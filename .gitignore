@@ -1,6 +1,9 @@
-node_modules
-dist
+.vscode/
+
+node_modules/
+dist/
 backend/models/
-backend/output
-backend/__pycache__
+backend/output/
+backend/__pycache__/
+
 temp
