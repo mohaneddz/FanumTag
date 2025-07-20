@@ -1,0 +1,6 @@
+node_modules
+dist
+backend/models/
+backend/output
+backend/__pycache__
+temp
