@@ -234,8 +234,11 @@ html {
 }
 
 select {
-    -webkit-appearance: none;
-    -moz-appearance: none;    
-    appearance: none;         
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
 }
 
+main {
+  @apply min-h-screen w-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-background-light-1 to-background-dark-2
+}
