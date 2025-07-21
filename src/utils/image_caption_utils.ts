@@ -41,10 +41,9 @@ export async function generateThumbnail(filePath: string): Promise<string | unde
 	}
 }
 
-
 export async function sendFilesToServer(files: string[], onProgress?: (data: any) => void): Promise<void> {
-	// Prepare array of {ind, path}
-	const payload = files.map((path, ind) => ({ ind, path }));
+	
+	const payload = files.map((path, ind) => ({ path, ind }));
 	console.log(`Starting caption generation for ${files.length} files...`);
 
 	try {
@@ -81,20 +80,20 @@ export async function sendFilesToServer(files: string[], onProgress?: (data: any
 
 							// Enhanced logging with progress
 							if (obj.error) {
-								console.error(
-									`❌ Error processing file ${obj.ind + 1}/${
-										files.length
-									}:`,
-									obj.error
-								);
+								// console.error(
+								// 	`❌ Error processing file ${obj.ind + 1}/${
+								// 		files.length
+								// 	}:`,
+								// 	obj.error
+								// );
 							} else {
-								console.log(
-									`✅ File ${processedCount}/${files.length} processed:`
-								);
-								console.log(`   📁 File: ${files[obj.ind]}`);
-								console.log(
-									`   📝 Caption: ${obj.name || 'No caption'}`
-								);
+								// console.log(
+								// 	`✅ File ${processedCount}/${files.length} processed:`
+								// );
+								// console.log(`   📁 File: ${files[obj.ind]}`);
+								// console.log(
+								// 	`   📝 Caption: ${obj.name || 'No caption'}`
+								// );
 							}
 
 							// Call progress callback if provided
@@ -123,13 +122,12 @@ export async function sendFilesToServer(files: string[], onProgress?: (data: any
 	}
 }
 
-// rename file x to y (does not overwrite, caller must ensure unique newPath)
 export async function renameFile(oldPath: string, newPath: string): Promise<void> {
-    try {
-        await invoke('rename_file', { oldPath, newPath });
-        console.log(`File renamed from ${oldPath} to ${newPath}`);
-    } catch (error) {
-        console.error('Error renaming file:', error);   
-        throw error;
-    }
+	try {
+		await invoke('rename_file', { oldPath, newPath });
+		// console.log(`File renamed from ${oldPath} to ${newPath}`);
+	} catch (error) {
+		console.error('Error renaming file:', error);
+		throw error;
+	}
 }

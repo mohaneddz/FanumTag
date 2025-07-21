@@ -16,6 +16,10 @@ const routes = [
   {
     path: "/settings",
     component: lazy(() => import("@/routes/Settings.tsx")),
+  },
+  {
+    path: "/about",
+    component: lazy(() => import("@/routes/About.tsx")),
   }
 ]
 
