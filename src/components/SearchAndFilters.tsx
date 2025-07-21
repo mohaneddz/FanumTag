@@ -51,11 +51,12 @@ export default function SearchAndFilters(props: SearchAndFiltersProps) {
                     <select
                         class="h-10 px-2 py-1 pr-8 rounded border border-background-light-2/30 bg-background-light-1/60 text-text-dark-1 focus:outline-none focus:border-primary"
                         value={props.sortBy}
-                        onChange={e => props.onSortChange(e.target.value as SortOption, props.sortDirection)}
+                        onChange={e => {props.onSortChange(e.target.value as SortOption, props.sortDirection);
+                            console.log(`Sort changed to ${e.target.value} ${props.sortDirection}`);
+                            console.log(`Total available types: ${props.availableTypes.length}`);
+                        }}
                     >
                         <option value="name" class="bg-background-light-1 text-text-dark-1">Name</option>
-                        <option value="size" class="bg-background-light-1 text-text-dark-1">Size</option>
-                        <option value="modified" class="bg-background-light-1 text-text-dark-1">Modified</option>
                         <option value="type" class="bg-background-light-1 text-text-dark-1">Type</option>
                     </select>
                     <span class="pointer-events-none absolute right-2 top-1/2 transform -translate-y-1/2 text-text-dark-2">
