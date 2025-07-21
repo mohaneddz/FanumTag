@@ -15,8 +15,8 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
-# Add global pause flag
-paused = False
+# Add global stop flag
+stopd = False
 
 @app.route("/caption", methods=["POST"])
 def caption_image():
@@ -77,11 +77,11 @@ def process_file(path, qwen=False):
     else:
         return None, "Unsupported file type"
 
-@app.route("/pause", methods=["POST"])
-def pause_server():
-    global paused
-    paused = True
-    return jsonify({"status": "paused"}), 200
+@app.route("/stop", methods=["POST"])
+def stop_server():
+    global stopd
+    stopd = True
+    return jsonify({"status": "stopd"}), 200
 
 @app.route("/captions", methods=["POST"])
 def captions_batch():
@@ -99,10 +99,11 @@ def captions_batch():
         qwen = data[0].get("qwen", False)
 
     def generate():
-        global paused
+        global stopd
         for item in data:
-            if paused:
-                yield json.dumps({"error": "Paused by user"}) + "\n"
+            if stopd:
+                yield json.dumps({"error": "Stopd by user"}) + "\n"
+                stopd = False
                 break  # Stop immediately
             # --- Disconnect detection ---
             if hasattr(request, "environ") and request.environ.get("wsgi.input"):

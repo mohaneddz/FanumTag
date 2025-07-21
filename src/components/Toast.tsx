@@ -1,4 +1,5 @@
 import { Show, createSignal, onCleanup } from "solid-js";
+import { Info, XCircle, TriangleAlert, CheckCircle } from "lucide-solid";
 
 type ToastVariant = "success" | "error" | "warning" | "info";
 
@@ -35,72 +36,11 @@ export default function Toast(props: ToastProps) {
         style="backdrop-filter: blur(8px);"
       >
         {/* Icon */}
-        <span>
-          {props.variant === "success" && (
-            <svg
-              width="20"
-              height="20"
-              fill="none"
-              viewBox="0 0 20 20"
-            >
-              <circle cx="10" cy="10" r="10" fill="#6A5ACD" />
-              <path
-                d="M6 10.5l2.5 2.5L14 7.5"
-                stroke="#fff"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-          )}
-          {props.variant === "error" && (
-            <svg
-              width="20"
-              height="20"
-              fill="none"
-              viewBox="0 0 20 20"
-            >
-              <circle cx="10" cy="10" r="10" fill="#D6336B" />
-              <path
-                d="M7 7l6 6M13 7l-6 6"
-                stroke="#fff"
-                stroke-width="2"
-                stroke-linecap="round"
-              />
-            </svg>
-          )}
-          {props.variant === "warning" && (
-            <svg
-              width="20"
-              height="20"
-              fill="none"
-              viewBox="0 0 20 20"
-            >
-              <circle cx="10" cy="10" r="10" fill="#C71585" />
-              <path
-                d="M10 6v5M10 13h.01"
-                stroke="#fff"
-                stroke-width="2"
-                stroke-linecap="round"
-              />
-            </svg>
-          )}
-          {props.variant === "info" && (
-            <svg
-              width="20"
-              height="20"
-              fill="none"
-              viewBox="0 0 20 20"
-            >
-              <circle cx="10" cy="10" r="10" fill="#7B68EE" />
-              <path
-                d="M10 7h.01M10 9v4"
-                stroke="#fff"
-                stroke-width="2"
-                stroke-linecap="round"
-              />
-            </svg>
-          )}
+        <span class="text-white/80">
+          {props.variant === "success" && <CheckCircle size={20} color="#FFFFFF" />}
+          {props.variant === "error" && <XCircle size={20} color="#FFFFFF" />}
+          {props.variant === "warning" && <TriangleAlert size={26} color="#FFFFFF" class="border-white border-1 p-1 rounded-full" />}
+          {props.variant === "info" && <Info size={20} color="#FFFFFF" />}
         </span>
         {/* Message */}
         <span class="flex-1">{props.message}</span>

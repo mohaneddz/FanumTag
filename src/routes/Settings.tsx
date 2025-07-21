@@ -1,5 +1,5 @@
 import { createSignal, onMount } from "solid-js";
-import { ArrowLeft, Download, Trash2 } from "lucide-solid";
+import { ArrowLeft, Cog, Download, Trash2 } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 import Button from "@/components/Button";
 import Dropdown from "@/components/Dropdown";
@@ -49,8 +49,10 @@ export default function Settings() {
             isLoaded() ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
           }`}
         >
+
           <div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-accent/10 to-primary/10 rounded-3xl blur-xl group-hover:blur-2xl transition-all duration-300"></div>
           <div class="relative bg-background-light-1/80 backdrop-blur-xl rounded-3xl border border-background-light-2/30 p-8 shadow-2xl">
+
             <div class="text-center mb-8">
               <div
                 class={`relative inline-block mb-4 transition-all duration-700 delay-100 ${
@@ -59,11 +61,11 @@ export default function Settings() {
               >
                 <div class="absolute inset-0 bg-gradient-to-r from-primary to-accent rounded-2xl blur-lg"></div>
                 <div class="relative w-20 h-20 bg-gradient-to-br from-primary to-accent rounded-2xl flex items-center justify-center shadow-lg">
-                  <span class="text-white text-2xl font-bold">⚙️</span>
+                  <span class="text-white text-2xl font-black"><Cog size={32} class="text-white"/></span>
                 </div>
               </div>
               <h1
-                class={`text-3xl font-bold bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent mb-2 transition-all duration-700 delay-200 ${
+                class={`text-3xl font-black bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent mb-2 transition-all duration-700 delay-200 ${
                   isLoaded() ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
                 }`}
               >
