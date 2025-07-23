@@ -208,6 +208,12 @@ export function usePreview(itemsPerPage = 10) {
 			return candidate;
 		}
 
+		// Helper: check for invalid Windows filename characters
+		function isValidWindowsFilename(name: string): boolean {
+			// Invalid chars: \ / : * ? " < > | and cannot end with space or dot
+			return !/[\\/:*?"<>|]/.test(name) && !/[ .]$/.test(name) && name.length > 0;
+		}
+
 		for (const fileName of selected) {
 			if (stopRequested()) break; // stop if refresh/stop requested
 			const afterNameRaw = getAfterName(fileName);
@@ -220,6 +226,18 @@ export function usePreview(itemsPerPage = 10) {
 				? afterNameRaw.slice(0, -ext.length)
 				: afterNameRaw;
 			let targetName = getUniqueName(afterBase, ext);
+
+			// Validate targetName before renaming
+			if (!isValidWindowsFilename(targetName)) {
+				errorCount++;
+				setToast({
+					message: `Invalid filename: "${targetName}". Skipped.`,
+					variant: 'error',
+					duration: 5000,
+				});
+				continue;
+			}
+
 			const oldPath = folderPath() + '/' + fileName;
 			const newPath = folderPath() + '/' + targetName;
 			if (oldPath === newPath) continue;
