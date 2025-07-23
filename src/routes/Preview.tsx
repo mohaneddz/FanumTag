@@ -135,7 +135,7 @@ export default function Preview() {
                                                                 <div class="text-sm font-semibold text-text-dark-1">
                                                                     Generating captions... {captionProgress()!.processed}/{captionProgress()!.total}
                                                                 </div>
-                                                                {captionProgress()!.currentFile && (
+                                                                {captionProgress()! && (
                                                                     <div class="text-xs text-text-dark-2">
                                                                         📝 {captionProgress()!.currentFile}
                                                                     </div>

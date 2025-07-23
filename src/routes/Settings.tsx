@@ -43,7 +43,7 @@ export default function Settings() {
 
   return (
     <main class="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-background-light-1 to-background-dark-2">
-      <div class="w-full max-w-md">
+      <div class="w-full max-w-lg">
         <div
           class={`relative group transition-all duration-500 ${
             isLoaded() ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
@@ -199,8 +199,8 @@ export default function Settings() {
                 }`}
               >
                 <div class="flex items-center justify-center gap-2">
-                  <span class="text-xs text-text-dark-2">
-                    Settings saved locally
+                  <span class="text-xs text-text-dark-2 text-center">
+                    Settings page no work lul, if I see ppl need the product then I'll make it
                   </span>
                   <div
                     style="animation-delay: 0.5s"
