@@ -200,7 +200,7 @@ export default function Settings() {
               >
                 <div class="flex items-center justify-center gap-2">
                   <span class="text-xs text-text-dark-2">
-                    Settings saved locally
+                    Settings page no work lul, if I see ppl need the product then I'll make it
                   </span>
                   <div
                     style="animation-delay: 0.5s"
