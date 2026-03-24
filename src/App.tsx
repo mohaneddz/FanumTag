@@ -1,38 +1,30 @@
-// import { createSignal } from "solid-js";
-// import { invoke } from "@tauri-apps/api/core";
-import Titlebar from "@/components/Titlebar";
 import { Router } from "@solidjs/router";
 import { lazy } from "solid-js";
 
+import Titlebar from "@/components/Titlebar";
+
 const routes = [
-  {
-    path: "/",
-    component: lazy(() => import("@/routes/Home.tsx")),
-  },
-  {
-    path: "/preview",
-    component: lazy(() => import("@/routes/Preview.tsx")),
-  },
-  {
-    path: "/settings",
-    component: lazy(() => import("@/routes/Settings.tsx")),
-  },
-  {
-    path: "/about",
-    component: lazy(() => import("@/routes/About.tsx")),
-  }
-]
+  { path: "/", component: lazy(() => import("@/routes/Preview")) },
+  { path: "/settings", component: lazy(() => import("@/routes/Settings")) },
+  { path: "/debug", component: lazy(() => import("@/routes/Debug")) },
+  { path: "/about", component: lazy(() => import("@/routes/About")) },
+];
 
 import "./App.css";
 
-function App() {
-
+export default function App() {
   return (
-    <main class="h-screen w-screen flex flex-col">
-      <Titlebar />
-      <Router>{routes}</Router>
+    <main class="h-screen w-screen flex flex-col overflow-hidden">
+      <Router
+        root={(props) => (
+          <>
+            <Titlebar />
+            <div class="flex-1 min-h-0 overflow-hidden">{props.children}</div>
+          </>
+        )}
+      >
+        {routes}
+      </Router>
     </main>
   );
 }
-
-export default App;
