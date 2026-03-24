@@ -1,47 +1,51 @@
 {
-	"$schema": "https://schema.tauri.app/config/2",
-	"productName": "fanumtag",
-	"version": "0.1.0",
-	"identifier": "com.fanumtag.app",
-	"build": {
-		"beforeDevCommand": "pnpm dev",
-		"devUrl": "http://localhost:1420",
-		"beforeBuildCommand": "pnpm build",
-		"frontendDist": "../dist"
-	},
-	"app": {
-		"windows": [
-			{
-				"title": "FanumTag",
-				"width": 720,
-				"height": 1024,
-				"minHeight": 1024,
-				"minWidth": 720,
-				"transparent": true,
-				"resizable": true,
-				"decorations": false,
-				"fullscreen": false,
-				"maximizable": false
-			}
-		],
-		"security": {
-			"csp": null
-		}
-	},
-	"bundle": {
-		"active": true,
-		"targets": "all",
-		"icon": [
-			"icons/32x32.png",
-			"icons/128x128.png",
-			"icons/128x128@2x.png",
-			"icons/icon.icns",
-			"icons/icon.ico"
-		]
-	},
-	"plugins": {
-		"fs": {
-			"requireLiteralLeadingDot": false
-		}
-	}
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "fanumtag",
+  "version": "0.1.0",
+  "identifier": "com.fanumtag.app",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "FanumTag",
+        "width": 1280,
+        "height": 860,
+        "minHeight": 760,
+        "minWidth": 1024,
+        "transparent": true,
+        "resizable": true,
+        "decorations": false,
+        "fullscreen": false,
+        "maximizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "resources": [
+      "lib/*",
+      "weights/*"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "fs": {
+      "requireLiteralLeadingDot": false
+    }
+  }
 }
