@@ -1,109 +1,49 @@
-import { createSignal, onMount } from "solid-js";
-import { ArrowLeft, Info } from "lucide-solid";
-import Button from "@/components/Button";
 import { useNavigate } from "@solidjs/router";
+import { ArrowLeft, ShieldCheck, FileSearch, Sparkles } from "lucide-solid";
 
 export default function About() {
-
-  const [isLoaded, setIsLoaded] = createSignal(false);
-
   const navigate = useNavigate();
 
-  onMount(() => {
-    setTimeout(() => setIsLoaded(true), 100);
-  });
-
-  const backToHome = () => {
-    navigate("/");
-  };
-
   return (
-    <main class="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-background-light-1 to-background-dark-2">
-      <div class="w-full max-w-xl">
-        <div
-          class={`relative group transition-all duration-500 ${isLoaded() ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
-            }`}
-        >
-          <div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-accent/10 to-primary/10 rounded-3xl blur-xl group-hover:blur-2xl transition-all duration-300"></div>
+    <section class="h-full overflow-auto p-4 md:p-6">
+      <article class="mx-auto max-w-5xl rounded-2xl border border-white/10 bg-slate-900/60 p-6 md:p-8 backdrop-blur-xl shadow-[0_20px_80px_rgba(0,0,0,0.45)]">
+        <div class="text-xs tracking-[0.2em] uppercase text-slate-400">About</div>
+        <h1 class="mt-2 text-3xl md:text-4xl font-bold text-slate-100">FanumTag</h1>
+        <p class="mt-4 text-sm md:text-base text-slate-300 max-w-3xl leading-relaxed">
+          FanumTag is a local-first file naming workspace for large media and document folders. It now runs on a Rust-managed runtime singleton with local Qwen vision inference and safe native rename execution.
+        </p>
 
-          <div class="relative bg-background-light-1/80 backdrop-blur-xl rounded-3xl border border-background-light-2/30 p-8 shadow-2xl">
-            <div class="text-center mb-8">
-              <div
-                class={`relative inline-block mb-4 transition-all duration-700 delay-100 ${isLoaded() ? "opacity-100 scale-100" : "opacity-0 scale-90"
-                  }`}
-              >
-                <div class="absolute inset-0 bg-gradient-to-r from-primary to-accent rounded-2xl blur-lg"></div>
-                <div class="relative w-20 h-20 bg-gradient-to-br from-primary to-accent rounded-2xl flex items-center justify-center shadow-lg">
-                  <span class="text-white text-2xl font-bold"><Info size={32} class="text-white" /></span>
-                </div>
-              </div>
-              <h1
-                class={`text-3xl font-black bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent mb-2 transition-all duration-700 delay-200 ${isLoaded() ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-                  }`}
-              >
-                About FanumTag
-              </h1>
-              <p
-                class={`text-text-dark-1 text-sm transition-all duration-700 delay-300 ${isLoaded() ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-                  }`}
-              >
-                More Manual and information about the project.
-              </p>
-
-              <h1 class="text-2xl font-black mt-8 text-accent">WHY??</h1>
-              <p class="text-text-dark-1 text-sm transition-all duration-700 delay-300">
-                FanumTag was created to simplify the process of extracting text from images and documents, making it accessible to everyone.
-                I have always struggled to find THAT exact MEM-, I mean, document, and I thought, why not create a tool that can help with that?
-              </p>
-
-              <h1 class="text-2xl font-black mt-8 text-accent">HOW!!</h1>
-              <p class="text-text-dark-1 text-sm transition-all duration-700 delay-300">
-                FanumTag uses advanced OCR and VLM models to analyze images and extract text if found. as well as KeyBERT for document captioning.
-                It supports multiple languages and can handle various image formats, making it versatile for different use cases.
-              </p>
-
-              <h1 class="text-2xl font-black mt-8 text-accent">WHO?!</h1>
-              <p class="text-text-dark-1 text-sm transition-all duration-700 delay-300">
-                asked?<br />
-                <a href="https://github.com/mohaneddz" class="underline font-bold"> &nbsp;I did &nbsp;</a> 
-              </p>
-
-            </div>
-
-
-            {/* Footer decoration */}
-            <div
-              class={`mt-2 pt-2 border-t border-background-light-2/30 transition-all duration-700 delay-800 ${isLoaded() ? "opacity-100" : "opacity-0"
-                }`}
-            >
-              <div class="flex items-center justify-center gap-2">
-                <span class="text-xs text-text-dark-2">
-                  This project was made as a joke obviously (not really)
-                </span>
-                <div
-                  style="animation-delay: 0.5s"
-                ></div>
-              </div>
-            </div>
-
-            {/* Back button */}
-            <div
-              class={`mt-6 flex justify-center w-full transition-all duration-700 delay-900 ${isLoaded() ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
-                }`}
-            >
-              <Button
-                type="button"
-                variant="ghost"
-                class="flex flex-nowrap items-center gap-2 px-4 py-2 rounded-xl border border-background-light-2/30 bg-background-light-1/60 hover:border-primary/30 text-text-dark-1 font-semibold"
-                onClick={backToHome}
-              >
-                <ArrowLeft size={18} />
-                Back to Home
-              </Button>
-            </div>
+        <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div class="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <FileSearch size={16} class="text-cyan-300" />
+            <h3 class="mt-2 text-sm font-semibold">Preview Before Rename</h3>
+            <p class="mt-1 text-xs text-slate-400">Inspect each proposed name before any disk mutation.</p>
+          </div>
+          <div class="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <ShieldCheck size={16} class="text-emerald-300" />
+            <h3 class="mt-2 text-sm font-semibold">Safety by Default</h3>
+            <p class="mt-1 text-xs text-slate-400">Validation, collision suffixing, and reserved-name handling are applied in Rust.</p>
+          </div>
+          <div class="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <Sparkles size={16} class="text-amber-300" />
+            <h3 class="mt-2 text-sm font-semibold">Local Runtime</h3>
+            <p class="mt-1 text-xs text-slate-400">No cloud dependency: vision model, queueing, and rename pipeline run locally.</p>
           </div>
         </div>
-      </div>
-    </main>
+
+        <div class="mt-6 rounded-xl border border-white/10 bg-white/[0.02] p-4 text-sm text-slate-300">
+          Workflow: select folder {">"} select rows {">"} generate suggestions {">"} apply renames.
+        </div>
+
+        <div class="mt-6 flex justify-end">
+          <button
+            class="h-9 px-3 rounded-lg border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-sm flex items-center gap-1.5"
+            onClick={() => navigate("/")}
+          >
+            <ArrowLeft size={14} /> Back to Workspace
+          </button>
+        </div>
+      </article>
+    </section>
   );
 }
