@@ -1,244 +1,185 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
 @import "tailwindcss";
 
-@theme {
-  /* --- Primary Purple Tones --- */
-  --color-primary: #8A2BE2;
-  /* Blue Violet (Original vibrant primary) */
-  --color-primary-light-1: #9F49F5;
-  --color-primary-light-2: #B564FF;
-  --color-primary-light-3: #CA7EFF;
-  --color-primary-dark-1: #6F22B4;
-  --color-primary-dark-2: #541987;
-  --color-primary-dark-3: #39115A;
+:root {
+  color-scheme: dark;
+}
 
-  /* --- Secondary Deep Purples --- */
-  --color-secondary: #4B0082;
-  /* Indigo (Deep, rich contrast) */
-  --color-secondary-light-1: #7126A8;
-  --color-secondary-light-2: #984DD0;
-  --color-secondary-light-3: #BE73F7;
-  --color-secondary-dark-1: #3C0068;
-  --color-secondary-dark-2: #2E004E;
-  --color-secondary-dark-3: #1F0034;
+* {
+  box-sizing: border-box;
+}
 
-  /* --- Tertiary Muted Purples/Grays --- */
-  --color-tertiary: #E0BBE4;
-  /* Light Plum (Soft background elements, or subtle text in dark mode) */
-  --color-tertiary-light-1: #EED6F0;
-  --color-tertiary-light-2: #F8EDFB;
-  --color-tertiary-light-3: #FFFFFF;
-  /* Pure white for very light elements */
-  --color-tertiary-dark-1: #C6A2CD;
-  --color-tertiary-dark-2: #AC89B6;
-  --color-tertiary-dark-3: #92709E;
-
-  /* --- Background Colors (Designed for easy light/dark swap) --- */
-  --color-background: #1A1A2E;
-  /* Deep almost-black for dark theme base */
-  --color-background-light-1: #2E2E44;
-  --color-background-light-2: #44445A;
-  --color-background-light-3: #5A5A70;
-  --color-background-dark-1: #141426;
-  --color-background-dark-2: #0E0E1E;
-  --color-background-dark-3: #080816;
-
-  /* --- Text Colors (Designed for easy light/dark swap) --- */
-  --color-text: #E0E0EB;
-  /* Off-white for dark theme text */
-  --color-text-light-1: #FFFFFF;
-  /* Pure white for very prominent text */
-  --color-text-light-2: #FFFFFF;
-  --color-text-light-3: #FFFFFF;
-  --color-text-dark-1: #C4C4D2;
-  --color-text-dark-2: #A8A8B8;
-  --color-text-dark-3: #8C8C9E;
-
-  /* --- Accent Color (Vibrant and contrasting) --- */
-  --color-accent: #FF69B4;
-  /* Hot Pink (Stands out on both light/dark) */
-  --color-accent-light-1: #FF8DD1;
-  --color-accent-light-2: #FFB1EE;
-  --color-accent-light-3: #FFD4FF;
-  --color-accent-dark-1: #CC5490;
-  --color-accent-dark-2: #993F6C;
-  --color-accent-dark-3: #662A48;
-
-  /* --- Functional Colors (Ensured visibility on both themes) --- */
-  --color-error: #D6336B;
-  /* A more purple-ish red */
-  --color-error-light-1: #E05E8E;
-  --color-error-light-2: #F38AB6;
-  --color-error-light-3: #FFB5DE;
-  --color-error-dark-1: #A32A52;
-  --color-error-dark-2: #7A203F;
-  --color-error-dark-3: #52162B;
-
-  --color-success: #6A5ACD;
-  /* Slate Blue (A calming, deep blue-violet for success) */
-  --color-success-light-1: #8D7EE1;
-  --color-success-light-2: #B09EF5;
-  --color-success-light-3: #D3BFF8;
-  --color-success-dark-1: #5548A4;
-  --color-success-dark-2: #40367B;
-  --color-success-dark-3: #2B2552;
-
-  --color-warning: #C71585;
-  /* Medium Violet Red (A strong, warning-appropriate pink-purple) */
-  --color-warning-light-1: #DA40A1;
-  --color-warning-light-2: #ED6BBD;
-  --color-warning-light-3: #FF96DA;
-  --color-warning-dark-1: #9D116A;
-  --color-warning-dark-2: #740C50;
-  --color-warning-dark-3: #4B0836;
-
-  --color-info: #7B68EE;
-  /* Medium Slate Blue (Clear info color - already good) */
-  --color-info-light-1: #9A89F4;
-  --color-info-light-2: #B9A9FA;
-  --color-info-light-3: #D8C9FF;
-  --color-info-dark-1: #6253BB;
-  --color-info-dark-2: #4A3E88;
-  --color-info-dark-3: #322955;
-
-  /* --- Border Colors --- */
-  --color-border: #5A5A70;
-  /* Muted purple-gray, works for both */
-  --color-border-light-1: #707086;
-  --color-border-light-2: #86869C;
-  --color-border-light-3: #9C9CB2;
-  --color-border-dark-1: #44445A;
-  --color-border-dark-2: #2E2E44;
-  --color-border-dark-3: #1A1A2E;
-
-  /* --- Shadow Colors (More subtle on dark, effective on light) --- */
-  --color-shadow: rgba(0, 0, 0, 0.4);
-  /* Deeper shadow for dark theme contrast */
-  --color-shadow-light-1: rgba(0, 0, 0, 0.3);
-  --color-shadow-light-2: rgba(0, 0, 0, 0.2);
-  --color-shadow-light-3: rgba(0, 0, 0, 0.1);
-  --color-shadow-dark-1: rgba(0, 0, 0, 0.5);
-  --color-shadow-dark-2: rgba(0, 0, 0, 0.6);
-  --color-shadow-dark-3: rgba(0, 0, 0, 0.7);
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
 }
 
 body {
-  opacity: 0.95;
-  background-color: var(--color-background);
-  color: var(--color-text);
-  font-family: 'Inter', 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
-  overflow-x: visible;
+  margin: 0;
+  font-family: "Space Grotesk", "Segoe UI Variable", sans-serif;
+  background:
+    radial-gradient(1200px 700px at 16% -24%, rgba(244, 114, 182, 0.22), transparent 60%),
+    radial-gradient(1200px 700px at 100% 5%, rgba(236, 72, 153, 0.18), transparent 56%),
+    radial-gradient(1100px 640px at 50% 120%, rgba(251, 113, 133, 0.12), transparent 65%),
+    linear-gradient(180deg, #09020a, #100410 48%, #070208);
+  color: rgb(226 232 240);
+  overflow: hidden;
+  position: relative;
 }
 
-html {
-  font-size: 10px;
-  font-family: 'Inter', 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
-}
-
-@media screen and (min-width: 1440px) {
-  html {
-    font-size: 12px;
-  }
-}
-
-@media screen and (min-width: 1600px) {
-  html {
-    font-size: 14px;
-  }
-}
-
-@media screen and (min-width: 1920px) {
-  html {
-    font-size: 16px;
-  }
-}
-
-
-.titlebar {
-  height: 30px;
-  /* background: #314057; */
-  user-select: none;
-  display: flex;
-  justify-content: flex-end;
+body::before {
+  content: "";
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 1000;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.18;
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.22) 1px, transparent 0),
+    radial-gradient(circle at 1px 1px, rgba(255, 182, 217, 0.14) 1px, transparent 0);
+  background-size: 3px 3px, 5px 5px;
+  mix-blend-mode: soft-light;
+  z-index: 0;
 }
 
-.titlebar-button {
+body::after {
+  content: "";
+  position: fixed;
+  inset: -14%;
+  pointer-events: none;
+  background:
+    radial-gradient(45% 36% at 22% 16%, rgba(255, 167, 214, 0.16), transparent 70%),
+    radial-gradient(44% 34% at 78% 20%, rgba(255, 144, 199, 0.13), transparent 72%),
+    radial-gradient(54% 42% at 50% 78%, rgba(255, 206, 233, 0.07), transparent 76%);
+  filter: blur(36px);
+  z-index: 0;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+.grain-surface {
+  position: relative;
+  overflow: hidden;
+}
+
+.grain-surface::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.08) 1px, transparent 0);
+  background-size: 2px 2px;
+  opacity: 0.14;
+}
+
+.logo-banner {
   display: inline-flex;
-  justify-content: center;
   align-items: center;
-  width: 30px;
-  height: 30px;
-  user-select: none;
-  -webkit-user-select: none;
-  filter: invert(1);
+  justify-content: center;
+  padding: 0;
 }
 
-.titlebar-button:hover {
-  background: #5a77a2;
+.logo-banner-image {
+  display: block;
+  width: min(680px, 70vw);
+  height: auto;
+  max-height: 74px;
+  object-fit: contain;
 }
 
-::selection {
-  background: var(--color-primary-light-2);
-  color: var(--color-text);
+.logo-banner-left {
+  font-size: clamp(1.65rem, 2.35vw, 2.7rem);
+  letter-spacing: 0.08em;
+  font-weight: 900;
+  color: #f8fafc;
 }
 
-@keyframes shimmer {
-  0% {
-    transform: translateX(-100%);
+.logo-banner-right {
+  font-size: clamp(1.65rem, 2.35vw, 2.7rem);
+  letter-spacing: 0.08em;
+  font-weight: 900;
+  color: #f72585;
+  text-shadow: 0 0 16px rgba(247, 37, 133, 0.55);
+}
+
+.logo-banner-slash {
+  font-size: clamp(1.95rem, 2.75vw, 3.1rem);
+  line-height: 1;
+  font-weight: 800;
+  color: #fb6bb2;
+  text-shadow: 0 0 20px rgba(251, 107, 178, 0.7);
+  transform: skewX(-10deg);
+}
+
+@media (max-width: 640px) {
+  .logo-banner-image {
+    width: min(460px, 74vw);
+    max-height: 56px;
   }
-
-  100% {
-    transform: translateX(100%);
-  }
 }
 
-@keyframes reverse {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(-360deg);
-  }
+.seg-progress-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
 }
 
-.animate-shimmer {
-  animation: shimmer 2s infinite;
+.seg-progress-track {
+  display: grid;
+  grid-template-columns: repeat(34, minmax(0, 1fr));
+  gap: 3px;
+  padding: 4px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(180deg, rgba(16, 12, 26, 0.88), rgba(9, 6, 16, 0.84));
+  box-shadow: inset 0 0 0 1px rgba(251, 113, 181, 0.08);
 }
 
-.animate-reverse {
-  animation: reverse 1s linear infinite;
+.seg-progress-block {
+  height: 14px;
+  transform: skewX(-14deg);
+  border-radius: 1px;
+  background: rgba(148, 163, 184, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.seg-progress-block.is-filled {
+  background: linear-gradient(180deg, rgba(251, 113, 181, 0.98), rgba(236, 72, 153, 0.93));
+  border-color: rgba(251, 113, 181, 0.62);
+  box-shadow: 0 0 8px rgba(251, 113, 181, 0.42);
+}
+
+.seg-progress-percent {
+  min-width: 42px;
+  text-align: right;
+  font-family: "JetBrains Mono", "Consolas", monospace;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #fb6bb2;
+  text-shadow: 0 0 10px rgba(251, 107, 178, 0.45);
+}
+
+code,
+.font-mono {
+  font-family: "JetBrains Mono", "Consolas", monospace;
 }
 
 ::-webkit-scrollbar {
   width: 10px;
-  background: var(--color-background-light-1);
+  height: 10px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-primary-light-2);
-  border-radius: 8px;
-  border: 2px solid var(--color-background-light-2);
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-primary);
-}
-
-::-webkit-scrollbar-corner {
-  background: var(--color-background-light-2);
-}
-
-select {
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
-}
-
-main {
-  @apply min-h-screen w-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-background-light-1 to-background-dark-2
+  background: rgba(148, 163, 184, 0.55);
 }
