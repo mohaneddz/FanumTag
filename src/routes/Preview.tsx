@@ -1,7 +1,6 @@
-import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js";
 import { useLocation, useNavigate } from "@solidjs/router";
 import { open } from "@tauri-apps/plugin-dialog";
-import { readDir } from "@tauri-apps/plugin-fs";
 import { desktopDir, documentDir, downloadDir, homeDir, pictureDir, videoDir } from "@tauri-apps/api/path";
 import {
   ArrowLeft,
@@ -25,13 +24,17 @@ import {
   Timer,
   Video,
   X,
+  Zap,
 } from "lucide-solid";
 
 import Toast from "@/components/Toast";
 import {
   applyRenames,
+  generateThumbnails,
+  listFolder,
   onRuntimeBatchProgress,
   runtimeCancelBatch,
+  runtimeForceStop,
   runtimeGenerateBatch,
   runtimeStart,
   type RuntimeBatchProgress,
@@ -40,12 +43,9 @@ import {
 } from "@/services/runtime";
 import {
   fileNameFromPath,
-  generateThumbnail,
   getExtension,
   getFileKind,
-  getFilePath,
   getFilterType,
-  mapWithConcurrency,
   type FileFilterType,
   type FileKind,
 } from "@/utils/files";
@@ -57,7 +57,6 @@ type WorkspaceFile = {
   extension: string;
   kind: FileKind;
   filterType: FileFilterType;
-  thumbnail?: string;
 };
 
 type NavItem = {
@@ -89,6 +88,7 @@ type PreviewStateSnapshot = {
   } | null;
   quickAccess: NavItem[];
   subfolders: string[];
+  thumbnails: [string, string][];
 };
 
 let previewStateCache: PreviewStateSnapshot | null = null;
@@ -139,7 +139,21 @@ export default function Preview() {
   const [quickAccess, setQuickAccess] = createSignal<NavItem[]>(cached?.quickAccess ?? []);
   const [subfolders, setSubfolders] = createSignal<string[]>(cached?.subfolders ?? []);
   const [toast, setToast] = createSignal<{ message: string; variant: "success" | "error" | "warning" | "info" } | null>(null);
+  const [thumbnails, setThumbnails] = createSignal<Map<string, string>>(new Map(cached?.thumbnails ?? []));
+  const [stopRequested, setStopRequested] = createSignal(false);
+  const [canForceStop, setCanForceStop] = createSignal(false);
   let activeFolderLoadId = 0;
+  let forceStopTimer: number | undefined;
+  const pendingThumbnails = new Set<string>();
+
+  const clearStopState = () => {
+    if (forceStopTimer !== undefined) {
+      clearTimeout(forceStopTimer);
+      forceStopTimer = undefined;
+    }
+    setStopRequested(false);
+    setCanForceStop(false);
+  };
 
   const statusText = createMemo(() => {
     if (loading()) return "Loading files";
@@ -290,28 +304,10 @@ export default function Preview() {
     setQuickAccess(Array.from(deduped.values()));
   };
 
-  const loadSubfolders = async (path: string) => {
-    if (!path) {
-      setSubfolders([]);
-      return;
-    }
-
-    try {
-      const entries = await readDir(path);
-      const folders = entries
-        .filter((entry) => entry.isDirectory && entry.name)
-        .map((entry) => getFilePath(path, entry.name!))
-        .sort((a, b) => a.localeCompare(b))
-        .slice(0, 80);
-      setSubfolders(folders);
-    } catch {
-      setSubfolders([]);
-    }
-  };
-
   const loadFolder = async (path: string) => {
     if (!path) {
       setFiles([]);
+      setSubfolders([]);
       return;
     }
 
@@ -319,39 +315,31 @@ export default function Preview() {
     setLoading(true);
 
     try {
-      const entries = await readDir(path);
-      const filesOnly = entries
-        .filter((entry) => !entry.isDirectory && entry.name)
-        .map((entry) => entry.name as string)
-        .sort((a, b) => a.localeCompare(b));
-
-      const rows: WorkspaceFile[] = filesOnly.map((name, index) => {
-        const filePath = getFilePath(path, name);
-        return {
-          index,
-          name,
-          path: filePath,
-          extension: getExtension(name),
-          kind: getFileKind(name),
-          filterType: getFilterType(name),
-        };
-      });
-
-      await mapWithConcurrency(rows, 6, async (row) => {
-        if (row.kind !== "image") return;
-        row.thumbnail = await generateThumbnail(row.path);
-      });
+      // Listing happens natively; only names cross the IPC boundary, so folders
+      // with thousands of files stay instant. Thumbnails load per visible page.
+      const listing = await listFolder(path);
 
       if (loadId !== activeFolderLoadId) {
         return;
       }
 
+      const rows: WorkspaceFile[] = listing.files.map((entry, index) => ({
+        index,
+        name: entry.name,
+        path: entry.path,
+        extension: entry.extension,
+        kind: entry.kind,
+        filterType: entry.filterType,
+      }));
+
+      pendingThumbnails.clear();
+      setThumbnails(new Map());
       setFiles(rows);
+      setSubfolders(listing.subfolders.slice(0, 200));
       setSelectedRows(new Set<number>());
       setResults(new Map());
       setProgress(null);
       setCurrentPage(1);
-      await loadSubfolders(path);
     } catch (error) {
       if (loadId !== activeFolderLoadId) {
         return;
@@ -362,6 +350,7 @@ export default function Preview() {
         variant: "error",
       });
       setFiles([]);
+      setSubfolders([]);
     } finally {
       if (loadId === activeFolderLoadId) {
         setLoading(false);
@@ -570,18 +559,37 @@ export default function Preview() {
       setActiveBatchRows(new Set<number>());
       setProgress(null);
       setBatchStartedAt(null);
+      clearStopState();
     }
   };
 
   const stopGeneration = async () => {
     try {
       await runtimeCancelBatch();
+      setStopRequested(true);
+      // A graceful stop only takes effect between files, so offer the hard kill
+      // shortly after in case the current file is a long transcription.
+      forceStopTimer = window.setTimeout(() => setCanForceStop(true), 2000);
       setToast({ message: "Cancel requested. Current batch will stop safely.", variant: "info" });
     } catch (error) {
       setToast({
         message: `Failed to send cancel request: ${error instanceof Error ? error.message : String(error)}`,
         variant: "error",
       });
+    }
+  };
+
+  const forceStopGeneration = async () => {
+    try {
+      await runtimeForceStop();
+      setToast({ message: "Runtime force stopped.", variant: "warning" });
+    } catch (error) {
+      setToast({
+        message: `Failed to force stop: ${error instanceof Error ? error.message : String(error)}`,
+        variant: "error",
+      });
+    } finally {
+      clearStopState();
     }
   };
 
@@ -714,6 +722,37 @@ export default function Preview() {
     }
   });
 
+  // Decode thumbnails only for the rows actually on screen, natively and in
+  // parallel. Reading whole images into the webview is what made large folders crawl.
+  createEffect(() => {
+    const page = paginated();
+
+    untrack(() => {
+      const known = thumbnails();
+      const wanted = page
+        .filter((row) => row.kind === "image" && !known.has(row.path) && !pendingThumbnails.has(row.path))
+        .map((row) => row.path);
+
+      if (wanted.length === 0) return;
+      for (const path of wanted) pendingThumbnails.add(path);
+
+      void generateThumbnails(wanted)
+        .then((results) => {
+          setThumbnails((prev) => {
+            const next = new Map(prev);
+            for (const result of results) {
+              if (result.dataUrl) next.set(result.path, result.dataUrl);
+            }
+            return next;
+          });
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          for (const path of wanted) pendingThumbnails.delete(path);
+        });
+    });
+  });
+
   createEffect(() => {
     searchTerm();
     typeFilter();
@@ -771,7 +810,14 @@ export default function Preview() {
       lastRunSummary: lastRunSummary(),
       quickAccess: quickAccess(),
       subfolders: subfolders(),
+      thumbnails: Array.from(thumbnails().entries()),
     };
+  });
+
+  onCleanup(() => {
+    if (forceStopTimer !== undefined) {
+      clearTimeout(forceStopTimer);
+    }
   });
 
   return (
@@ -914,6 +960,7 @@ export default function Preview() {
               const Icon = iconForFilterType(item.filterType);
               const selected = selectedRows().has(item.index);
               const result = results().get(item.index);
+              const thumbnail = thumbnails().get(item.path);
 
               return (
                 <article class={`rounded-xl border p-2 grid grid-cols-[28px_64px_1fr_34px_1fr_34px] gap-2 items-center ${selected ? "border-pink-300/45 bg-pink-400/[0.07]" : "border-white/10 bg-white/[0.02]"}`}>
@@ -925,7 +972,7 @@ export default function Preview() {
                   </button>
 
                   <div class="h-12 rounded-lg border border-white/10 bg-slate-950/70 overflow-hidden flex items-center justify-center">
-                    {item.thumbnail ? <img src={item.thumbnail} alt={item.name} class="h-full w-full object-cover" /> : <Icon size={16} class="text-slate-400" />}
+                    {thumbnail ? <img src={thumbnail} alt={item.name} class="h-full w-full object-cover" /> : <Icon size={16} class="text-slate-400" />}
                   </div>
 
                   <div class="min-w-0">
@@ -994,12 +1041,23 @@ export default function Preview() {
 
             <div class="flex flex-wrap items-center gap-2">
               {generating() ? (
-                <button
-                  class="h-9 px-3 rounded-lg border border-amber-300/40 bg-amber-400/15 text-amber-100 text-sm flex items-center gap-1.5 hover:bg-amber-400/25"
-                  onClick={() => void stopGeneration()}
-                >
-                  <Square size={14} /> Stop
-                </button>
+                canForceStop() ? (
+                  <button
+                    class="h-9 px-3 rounded-lg border border-rose-300/50 bg-rose-500/20 text-rose-100 text-sm flex items-center gap-1.5 hover:bg-rose-500/30"
+                    onClick={() => void forceStopGeneration()}
+                    title="Kill the model and any running media tools immediately"
+                  >
+                    <Zap size={14} /> Force Stop
+                  </button>
+                ) : (
+                  <button
+                    class="h-9 px-3 rounded-lg border border-pink-300/45 bg-pink-400/15 text-pink-100 text-sm flex items-center gap-1.5 hover:bg-pink-400/25 disabled:opacity-60"
+                    onClick={() => void stopGeneration()}
+                    disabled={stopRequested()}
+                  >
+                    <Square size={14} /> {stopRequested() ? "Stopping..." : "Stop"}
+                  </button>
+                )
               ) : (
                 <button
                   class="h-9 px-3 rounded-lg border border-pink-300/45 bg-pink-400/15 text-pink-100 text-sm flex items-center gap-1.5 hover:bg-pink-400/25 disabled:opacity-50"
@@ -1089,7 +1147,7 @@ export default function Preview() {
                     <div class="truncate font-mono">{file.name}</div>
                     <div class="mt-0.5 flex items-center justify-between gap-2">
                       <span class="truncate text-slate-300">{ready ? result!.suggestedName : "Pending"}</span>
-                      <span class={`shrink-0 uppercase tracking-[0.12em] text-[10px] ${ready ? "text-emerald-200" : "text-amber-200"}`}>
+                      <span class={`shrink-0 uppercase tracking-[0.12em] text-[10px] ${ready ? "text-emerald-200" : "text-pink-200"}`}>
                         {ready ? result?.source ?? "ready" : "pending"}
                       </span>
                     </div>
