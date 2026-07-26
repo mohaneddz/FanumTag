@@ -148,11 +148,11 @@ export default function Debug() {
             <button class="h-9 px-3 rounded-lg border border-rose-300/35 bg-rose-400/15 text-sm flex items-center gap-1.5" onClick={() => void stop()} disabled={busy()}>
               <Square size={14} /> Stop
             </button>
-            <button class="h-9 px-3 rounded-lg border border-cyan-300/35 bg-cyan-400/15 text-sm flex items-center gap-1.5" onClick={() => void testSingleFile()} disabled={busy()}>
+            <button class="h-9 px-3 rounded-lg border border-pink-300/35 bg-pink-400/15 text-sm flex items-center gap-1.5" onClick={() => void testSingleFile()} disabled={busy()}>
               <Image size={14} /> Test File
             </button>
             <button
-              class="h-9 px-3 rounded-lg border border-amber-300/35 bg-amber-400/15 text-sm flex items-center gap-1.5"
+              class="h-9 px-3 rounded-lg border border-rose-300/35 bg-rose-400/15 text-sm flex items-center gap-1.5"
               onClick={() => {
                 const windowRef = getCurrentWindow() as unknown as { openDevtools?: () => void };
                 windowRef.openDevtools?.();
@@ -169,7 +169,7 @@ export default function Debug() {
               value={probePrompt()}
               onInput={(e) => setProbePrompt(e.currentTarget.value)}
             />
-            <button class="h-9 px-3 rounded-lg border border-violet-300/35 bg-violet-400/15 text-sm flex items-center gap-1.5" onClick={() => void runProbe()} disabled={busy()}>
+            <button class="h-9 px-3 rounded-lg border border-emerald-300/35 bg-emerald-400/15 text-sm flex items-center gap-1.5" onClick={() => void runProbe()} disabled={busy()}>
               <FileText size={14} /> Run Probe
             </button>
           </div>

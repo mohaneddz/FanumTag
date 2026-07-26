@@ -15,7 +15,7 @@ export default function About() {
 
         <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-3">
           <div class="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-            <FileSearch size={16} class="text-cyan-300" />
+            <FileSearch size={16} class="text-pink-300" />
             <h3 class="mt-2 text-sm font-semibold">Preview Before Rename</h3>
             <p class="mt-1 text-xs text-slate-400">Inspect each proposed name before any disk mutation.</p>
           </div>
@@ -25,7 +25,7 @@ export default function About() {
             <p class="mt-1 text-xs text-slate-400">Validation, collision suffixing, and reserved-name handling are applied in Rust.</p>
           </div>
           <div class="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-            <Sparkles size={16} class="text-amber-300" />
+            <Sparkles size={16} class="text-emerald-300" />
             <h3 class="mt-2 text-sm font-semibold">Local Runtime</h3>
             <p class="mt-1 text-xs text-slate-400">No cloud dependency: vision model, queueing, and rename pipeline run locally.</p>
           </div>
