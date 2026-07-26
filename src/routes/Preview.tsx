@@ -45,6 +45,7 @@ import {
   getFileKind,
   getFilePath,
   getFilterType,
+  mapWithConcurrency,
   type FileFilterType,
   type FileKind,
 } from "@/utils/files";
@@ -336,12 +337,10 @@ export default function Preview() {
         };
       });
 
-      await Promise.all(
-        rows.map(async (row) => {
-          if (row.kind !== "image") return;
-          row.thumbnail = await generateThumbnail(row.path);
-        })
-      );
+      await mapWithConcurrency(rows, 6, async (row) => {
+        if (row.kind !== "image") return;
+        row.thumbnail = await generateThumbnail(row.path);
+      });
 
       if (loadId !== activeFolderLoadId) {
         return;
