@@ -20,8 +20,8 @@ const iconByVariant = {
 const styleByVariant: Record<ToastVariant, string> = {
   success: "border-emerald-300/40 bg-emerald-500/15 text-emerald-100",
   error: "border-rose-300/40 bg-rose-500/15 text-rose-100",
-  warning: "border-amber-300/40 bg-amber-500/15 text-amber-100",
-  info: "border-cyan-300/40 bg-cyan-500/15 text-cyan-100",
+  warning: "border-rose-300/40 bg-rose-500/15 text-rose-100",
+  info: "border-pink-300/40 bg-pink-500/15 text-pink-100",
 };
 
 export default function Toast(props: ToastProps) {
