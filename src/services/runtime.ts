@@ -64,12 +64,42 @@ export type RuntimeProbeResult = {
   elapsedMs: number;
 };
 
+export type RuntimeHealth = {
+  running: boolean;
+  busy: boolean;
+  responsive: boolean;
+  lastError?: string | null;
+};
+
+export type FolderEntry = {
+  name: string;
+  path: string;
+  extension: string;
+  kind: "image" | "video" | "audio" | "txt" | "fallback";
+  filterType: "image" | "video" | "audio" | "text" | "other";
+};
+
+export type FolderListing = {
+  files: FolderEntry[];
+  subfolders: string[];
+};
+
+export type ThumbnailResult = {
+  path: string;
+  dataUrl?: string | null;
+};
+
 export const runtimeGetStatus = () => invoke<RuntimeStatus>("runtime_get_status");
 export const runtimeGetConfig = () => invoke<RuntimeConfig>("runtime_get_config");
 export const runtimeUpdateConfig = (config: RuntimeConfig) => invoke<RuntimeConfig>("runtime_update_config", { config });
 export const runtimeStart = () => invoke<RuntimeStatus>("runtime_start");
 export const runtimeStop = () => invoke<RuntimeStatus>("runtime_stop");
 export const runtimeCancelBatch = () => invoke<RuntimeStatus>("runtime_cancel_batch");
+export const runtimeForceStop = () => invoke<RuntimeStatus>("runtime_force_stop");
+export const runtimeHealth = () => invoke<RuntimeHealth>("runtime_health");
+export const listFolder = (path: string) => invoke<FolderListing>("list_folder", { path });
+export const generateThumbnails = (paths: string[]) =>
+  invoke<ThumbnailResult[]>("generate_thumbnails", { paths });
 export const runtimeGenerateBatch = (requests: RuntimeBatchRequest[]) =>
   invoke<RuntimeBatchResult[]>("runtime_generate_batch", { requests });
 export const applyRenames = (requests: RenameRequest[]) => invoke<RenameResult[]>("apply_renames", { requests });
