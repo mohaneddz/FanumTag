@@ -145,6 +145,25 @@ export async function extractVideoFrameBase64(filePath: string): Promise<string 
   }
 }
 
+export async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await fn(items[index], index);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+  return results;
+}
+
 export function fileNameFromPath(path: string): string {
   const normalized = path.replace(/\\/g, "/");
   const parts = normalized.split("/");
