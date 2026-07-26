@@ -923,13 +923,35 @@ fn is_windows_reserved_name(name: &str) -> bool {
     )
 }
 
-fn normalize_response_text(raw: &str, fallback: &str, max_words: usize) -> String {
-    let without_thinking = raw
-        .replace("<think>", "")
-        .replace("</think>", "")
-        .replace("\"", " ");
+/// Drops reasoning blocks entirely. Removing only the tags would leave the
+/// model's private reasoning behind, and that text would become the filename.
+fn strip_thinking_blocks(raw: &str) -> String {
+    const OPEN: &str = "<think>";
+    const CLOSE: &str = "</think>";
 
-    sanitize_filename_base_with_limit(&without_thinking, fallback, max_words)
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+
+    while let Some(start) = rest.find(OPEN) {
+        out.push_str(&rest[..start]);
+        let after_open = &rest[start + OPEN.len()..];
+
+        match after_open.find(CLOSE) {
+            Some(end) => rest = &after_open[end + CLOSE.len()..],
+            // Unterminated block: everything that follows is reasoning.
+            None => return out,
+        }
+    }
+
+    out.push_str(rest);
+    out
+}
+
+fn normalize_response_text(raw: &str, fallback: &str, max_words: usize) -> String {
+    // A stray closing tag can appear without an opener when output is truncated.
+    let cleaned = strip_thinking_blocks(raw).replace("</think>", " ").replace('"', " ");
+
+    sanitize_filename_base_with_limit(&cleaned, fallback, max_words)
 }
 
 fn extract_openai_content(value: &Value) -> Option<String> {
@@ -2131,4 +2153,103 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trims_connectives_left_dangling_by_the_word_limit() {
+        let raw = "Quarterly Engineering Review Meeting Database Migration Timeline and Authentication";
+        assert_eq!(
+            sanitize_filename_base_with_limit(raw, "File", 8),
+            "Quarterly Engineering Review Meeting Database Migration Timeline"
+        );
+    }
+
+    #[test]
+    fn keeps_a_single_word_even_if_it_is_a_connective() {
+        assert_eq!(sanitize_filename_base_with_limit("the", "File", 8), "the");
+    }
+
+    #[test]
+    fn enforces_the_word_limit_per_style() {
+        let raw = "one two three four five six seven eight nine ten";
+        assert_eq!(
+            sanitize_filename_base_with_limit(raw, "File", 4),
+            "one two three four"
+        );
+    }
+
+    #[test]
+    fn strips_characters_windows_rejects_in_filenames() {
+        let cleaned = sanitize_filename_base_with_limit("re:port <v2>/final", "File", 8);
+        assert!(!cleaned.contains([':', '<', '>', '/', '*', '?', '|']));
+        assert!(!cleaned.contains('\\'));
+    }
+
+    #[test]
+    fn falls_back_when_the_model_returns_nothing_usable() {
+        assert_eq!(sanitize_filename_base_with_limit("   ", "File", 8), "File");
+    }
+
+    #[test]
+    fn escapes_reserved_device_names() {
+        assert_eq!(sanitize_filename_base_with_limit("CON", "File", 8), "CON file");
+        assert!(is_windows_reserved_name("nul"));
+    }
+
+    #[test]
+    fn quoted_model_output_is_unwrapped() {
+        assert_eq!(
+            normalize_response_text("\"Pixel Art Game\"", "File", 8),
+            "Pixel Art Game"
+        );
+    }
+
+    #[test]
+    fn reasoning_blocks_never_leak_into_the_filename() {
+        assert_eq!(
+            normalize_response_text(
+                "<think>The user wants a short name so I will pick</think>Sunset Over Harbor",
+                "File",
+                8
+            ),
+            "Sunset Over Harbor"
+        );
+    }
+
+    #[test]
+    fn unterminated_reasoning_block_discards_the_remainder() {
+        assert_eq!(
+            normalize_response_text("Sunset Over Harbor<think>now let me reconsider", "File", 8),
+            "Sunset Over Harbor"
+        );
+    }
+
+    #[test]
+    fn stray_closing_tag_is_dropped() {
+        assert_eq!(
+            normalize_response_text("Sunset Over Harbor</think>", "File", 8),
+            "Sunset Over Harbor"
+        );
+    }
+
+    #[test]
+    fn classifies_extensions_for_the_folder_listing() {
+        assert_eq!(classify_extension(".GIF"), ("image", "image"));
+        assert_eq!(classify_extension(".mp4"), ("video", "video"));
+        assert_eq!(classify_extension(".flac"), ("audio", "audio"));
+        assert_eq!(classify_extension(".txt"), ("txt", "text"));
+        assert_eq!(classify_extension(".zip"), ("fallback", "other"));
+        assert_eq!(classify_extension(""), ("fallback", "other"));
+    }
+
+    #[test]
+    fn animated_containers_are_routed_to_ffmpeg() {
+        assert!(image_is_animated_container(Path::new("a/b/clip.gif")));
+        assert!(image_is_animated_container(Path::new("clip.WEBP")));
+        assert!(!image_is_animated_container(Path::new("photo.jpg")));
+    }
 }
