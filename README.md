@@ -4,7 +4,7 @@
 </h1>
 
 FanumTag is a local-first desktop rename workspace built with **Tauri (Rust) + SolidJS (TypeScript)**.
-It runs local inference, generates structured rename suggestions, and applies safe bulk renames.
+It scans a folder into a visual queue, uses local AI to suggest descriptive filenames, and applies safe bulk renames without uploading your files.
 
 ---
 
@@ -34,20 +34,41 @@ It runs local inference, generates structured rename suggestions, and applies sa
 
 ## Features
 
-- Folder queue preview with search/filter/pagination
-- Batch suggestion generation (image/video/txt + deterministic fallback)
-- Cancel support during active generation
+- Workspace queue with folder quick access, subfolder browsing, thumbnails, search, sorting, filtering, and pagination
+- Batch suggestions for images, videos, and text files, with deterministic fallback handling
+- Live generation progress with per-file status, ready/pending counts, and a Stop control
+- Selection tools for selecting all, selecting a page, selecting ready items, inverting a page, and keeping ready items
 - Safe native renames with collision handling and Windows-name validation
+- Runtime settings for host, port, threads, GPU layers, context size, request timeout, and auto-start
+- Runtime health checks for bundled inference, Whisper, and FFmpeg dependencies
 
 ---
 
 ## Screenshots
 
-<img src="screenshots/home.png" alt="FanumTag Home" width="88%"/>
+### Empty workspace
 
-<img src="screenshots/progress.png" alt="FanumTag Progress" width="88%"/>
+Start by selecting a folder. The workspace provides quick access to common folders and keeps the selection and pagination panels ready for the queue.
 
-<img src="screenshots/result.png" alt="FanumTag Results" width="88%"/>
+<img src="screenshots/home.png" alt="FanumTag empty workspace" width="88%"/>
+
+### Loaded queue
+
+Review thumbnails and pending files before generating suggestions. The queue supports search, sorting, file-type filtering, subfolders, and page navigation.
+
+<img src="screenshots/ready.png" alt="FanumTag loaded file queue" width="88%"/>
+
+### Generating suggestions
+
+Generation progress is shown in the workspace footer and in the per-file status column. You can stop an active batch at any time.
+
+<img src="screenshots/working.png" alt="FanumTag generating rename suggestions" width="88%"/>
+
+### Runtime settings
+
+Configure the local runtime and check the health of its bundled dependencies from the Settings view.
+
+<img src="screenshots/settings.png" alt="FanumTag runtime settings" width="88%"/>
 
 ---
 
