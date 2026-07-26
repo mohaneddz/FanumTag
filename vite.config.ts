@@ -21,6 +21,20 @@ export default defineConfig(async () => ({
 		},
 	},
 
+	build: {
+		target: 'esnext',
+		minify: 'esbuild',
+		rollupOptions: {
+			output: {
+				manualChunks(id) {
+					if (id.includes('node_modules')) {
+						return 'vendor';
+					}
+				},
+			},
+		},
+	},
+
 	server: {
 		port: 1420,
 		strictPort: true,
