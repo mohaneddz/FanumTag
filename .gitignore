@@ -18,3 +18,8 @@ temp
 weights/
 models/
 whisper/
+
+# CUDA runtime redistributables (too large for git; place locally before `tauri build`)
+src-tauri/lib/cudart64_*.dll
+src-tauri/lib/cublas64_*.dll
+src-tauri/lib/cublasLt64_*.dll
