@@ -16,6 +16,8 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 use zip::read::ZipArchive;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 const RUNTIME_ALIAS: &str = "qwen2-vl-local";
 const RUNTIME_PROGRESS_EVENT: &str = "runtime://batch-progress";
@@ -28,6 +30,8 @@ const WHISPER_RELEASE_ZIP_URL: &str =
     "https://github.com/ggml-org/whisper.cpp/releases/latest/download/whisper-bin-x64.zip";
 const FFMPEG_RELEASE_ZIP_URL: &str =
     "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl-shared.zip";
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -290,6 +294,13 @@ fn resolve_whisper_cli_path(lib_dir: &Path) -> Option<PathBuf> {
         .find(|path| path.exists())
 }
 
+fn find_bundled_file(app: &AppHandle, relative: &str) -> Option<PathBuf> {
+    base_path_candidates(app)
+        .into_iter()
+        .map(|base| base.join(relative))
+        .find(|candidate| candidate.exists())
+}
+
 fn resolve_whisper_assets(app: &AppHandle) -> Option<WhisperAssets> {
     for base in base_path_candidates(app) {
         let mut assets = whisper_assets_from_base(&base);
@@ -379,10 +390,14 @@ fn bootstrap_whisper_assets(app: &AppHandle) -> Result<WhisperAssets, String> {
     fs::create_dir_all(&assets.weights_dir).map_err(|e| e.to_string())?;
 
     if resolve_whisper_cli_path(&assets.lib_dir).is_none() {
-        let zip_path = writable_base.join("lib").join("whisper-bin-x64.zip");
-        download_to_path(WHISPER_RELEASE_ZIP_URL, &zip_path)?;
-        unpack_zip_to_dir(&zip_path, &assets.lib_dir)?;
-        let _ = fs::remove_file(&zip_path);
+        if let Some(bundled_zip) = find_bundled_file(app, "lib/whisper-bin-x64.zip") {
+            unpack_zip_to_dir(&bundled_zip, &assets.lib_dir)?;
+        } else {
+            let zip_path = writable_base.join("lib").join("whisper-bin-x64.zip");
+            download_to_path(WHISPER_RELEASE_ZIP_URL, &zip_path)?;
+            unpack_zip_to_dir(&zip_path, &assets.lib_dir)?;
+            let _ = fs::remove_file(&zip_path);
+        }
     }
 
     if !assets.ffmpeg_path.exists() {
@@ -434,8 +449,16 @@ fn prepend_path(lib_dir: &Path) -> Result<OsString, String> {
     std::env::join_paths(paths).map_err(|e| e.to_string())
 }
 
+fn configure_process_command(command: &mut Command) {
+    #[cfg(target_os = "windows")]
+    {
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
 fn spawn_runtime_process(assets: &RuntimeAssets, config: &RuntimeConfig) -> Result<Child, String> {
     let mut cmd = Command::new(&assets.exe_path);
+    configure_process_command(&mut cmd);
     cmd.arg("--model")
         .arg(&assets.model_path)
         .arg("--mmproj")
@@ -455,6 +478,7 @@ fn spawn_runtime_process(assets: &RuntimeAssets, config: &RuntimeConfig) -> Resu
         .arg("--jinja")
         .arg("--no-webui")
         .arg("--no-warmup")
+        .arg("--flash-attn")
         .current_dir(&assets.lib_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -702,11 +726,17 @@ impl FilenameStyle {
     }
 
     fn prompt_instruction(self) -> String {
-        match self {
-            Self::Short => "Generate a short filename title (max 4 words). Return title only.".to_string(),
-            Self::Average => "Generate a concise filename title (max 8 words). Return title only.".to_string(),
-            Self::Long => "Generate a detailed filename title (max 14 words). Return title only.".to_string(),
-        }
+        let limit = match self {
+            Self::Short => "a short filename title (max 4 words)",
+            Self::Average => "a concise filename title (max 8 words)",
+            Self::Long => "a detailed filename title (max 14 words)",
+        };
+        format!(
+            "Generate {limit} that names the main subject and action or context of this image. \
+             Use plain descriptive words a person would use to file this. \
+             Do not include phrases like 'image of', 'a photo showing', or similar preambles. \
+             Do not include a file extension. Return the title only, nothing else."
+        )
     }
 }
 
@@ -896,7 +926,9 @@ fn encode_image_file_to_jpeg_base64_via_ffmpeg(path: &Path, ffmpeg_path: &Path) 
         now_nanos
     ));
 
-    let status = Command::new(ffmpeg_path)
+    let mut command = Command::new(ffmpeg_path);
+    configure_process_command(&mut command);
+    let status = command
         .arg("-y")
         .arg("-i")
         .arg(path)
@@ -942,7 +974,7 @@ fn generate_title_from_text(
             {
                 "role": "user",
                 "content": format!(
-                    "Generate a filename title (max {} words) for this text content. Keep it informative and natural. Return title only.\\n\\n{}",
+                    "Generate a filename title (max {} words) for this text content. Keep it informative and natural, using plain descriptive words a person would use to file this. Do not include a file extension or phrases like 'text about'. Return the title only.\\n\\n{}",
                     max_words, snippet
                 )
             }
@@ -1019,7 +1051,9 @@ fn generate_title_from_audio_transcript(
 }
 
 fn extract_audio_wav(media_path: &Path, ffmpeg_path: &Path, output_wav: &Path) -> Result<(), String> {
-    let status = Command::new(ffmpeg_path)
+    let mut command = Command::new(ffmpeg_path);
+    configure_process_command(&mut command);
+    let status = command
         .arg("-y")
         .arg("-i")
         .arg(media_path)
@@ -1055,7 +1089,9 @@ fn extract_video_frame_base64(media_path: &Path, ffmpeg_path: &Path) -> Result<S
         now_nanos
     ));
 
-    let status = Command::new(ffmpeg_path)
+    let mut command = Command::new(ffmpeg_path);
+    configure_process_command(&mut command);
+    let status = command
         .arg("-y")
         .arg("-i")
         .arg(media_path)
@@ -1098,6 +1134,7 @@ fn transcribe_media_with_whisper(media_path: &Path, whisper: &WhisperAssets) -> 
 
     let run_whisper = |args: &[&str]| -> Result<bool, String> {
         let mut command = Command::new(&whisper.whisper_cli_path);
+        configure_process_command(&mut command);
         command
             .arg("-m")
             .arg(&whisper.model_path)
