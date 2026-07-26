@@ -147,7 +147,7 @@ export default function Settings() {
                 <RefreshCw size={14} /> Refresh
               </button>
               <button
-                class="h-9 px-3 rounded-lg border border-cyan-300/40 bg-cyan-400/15 text-cyan-100 text-sm flex items-center gap-1.5 hover:bg-cyan-400/25 disabled:opacity-50"
+                class="h-9 px-3 rounded-lg border border-pink-300/40 bg-pink-400/15 text-pink-100 text-sm flex items-center gap-1.5 hover:bg-pink-400/25 disabled:opacity-50"
                 onClick={() => void saveConfig()}
                 disabled={busy() || !form()}
               >
