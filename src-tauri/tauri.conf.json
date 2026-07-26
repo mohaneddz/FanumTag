@@ -31,9 +31,22 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "FanumTag",
+    "shortDescription": "A fast, local video/image naming utility.",
     "resources": [
-      "lib/*",
-      "weights/*"
+      "lib/llama-server.exe",
+      "lib/llama.dll",
+      "lib/mtmd.dll",
+      "lib/ggml.dll",
+      "lib/ggml-base.dll",
+      "lib/ggml-cpu.dll",
+      "lib/ggml-cuda.dll",
+      "lib/cudart64_12.dll",
+      "lib/cublas64_12.dll",
+      "lib/cublasLt64_12.dll",
+      "lib/whisper-bin-x64.zip",
+      "weights/Qwen2-VL-2B-Instruct-IQ2_M.gguf",
+      "weights/mmproj-Qwen2-VL-2B-Instruct-f16.gguf"
     ],
     "icon": [
       "icons/32x32.png",
