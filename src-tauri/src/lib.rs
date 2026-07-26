@@ -11,6 +11,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -77,12 +78,25 @@ struct WhisperAssets {
     weights_dir: PathBuf,
 }
 
+/// Optional helper binaries for a batch. ffmpeg alone is enough for animated
+/// images and video frames; whisper is only needed to read speech.
+#[derive(Debug, Clone, Default)]
+struct MediaAssets {
+    ffmpeg_path: Option<PathBuf>,
+    whisper: Option<WhisperAssets>,
+}
+
 #[derive(Debug)]
 struct RuntimeManager {
     config: RuntimeConfig,
     child: Option<Child>,
     busy: bool,
     cancel_requested: bool,
+    force_stop_requested: bool,
+    /// ffmpeg / whisper processes currently running for the active batch, so a
+    /// force stop can kill work that is already mid-flight.
+    aux_children: Vec<(u64, Child)>,
+    next_aux_id: u64,
     last_error: Option<String>,
 }
 
@@ -93,6 +107,9 @@ impl RuntimeManager {
             child: None,
             busy: false,
             cancel_requested: false,
+            force_stop_requested: false,
+            aux_children: Vec::new(),
+            next_aux_id: 0,
             last_error: None,
         }
     }
@@ -317,6 +334,13 @@ fn resolve_whisper_assets(app: &AppHandle) -> Option<WhisperAssets> {
     None
 }
 
+fn resolve_ffmpeg_path(app: &AppHandle) -> Option<PathBuf> {
+    base_path_candidates(app)
+        .into_iter()
+        .map(|base| base.join("lib").join("ffmpeg.exe"))
+        .find(|candidate| candidate.exists())
+}
+
 fn ensure_parent_dir(path: &Path) -> Result<(), String> {
     match path.parent() {
         Some(parent) => fs::create_dir_all(parent).map_err(|e| e.to_string()),
@@ -374,6 +398,34 @@ fn unpack_zip_to_dir(zip_path: &Path, output_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Ensures ffmpeg alone is available. Frame extraction for animated images and
+/// video only needs ffmpeg, not the much larger whisper speech model.
+fn ensure_ffmpeg(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Some(existing) = resolve_ffmpeg_path(app) {
+        return Ok(existing);
+    }
+
+    let lib_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("runtime-assets")
+        .join("lib");
+    fs::create_dir_all(&lib_dir).map_err(|e| e.to_string())?;
+
+    let zip_path = lib_dir.join("ffmpeg-bin-x64.zip");
+    download_to_path(FFMPEG_RELEASE_ZIP_URL, &zip_path)?;
+    unpack_zip_to_dir(&zip_path, &lib_dir)?;
+    let _ = fs::remove_file(&zip_path);
+
+    let ffmpeg_path = lib_dir.join("ffmpeg.exe");
+    if ffmpeg_path.exists() {
+        Ok(ffmpeg_path)
+    } else {
+        Err("ffmpeg bootstrap finished but ffmpeg.exe was not found.".to_string())
+    }
+}
+
 fn bootstrap_whisper_assets(app: &AppHandle) -> Result<WhisperAssets, String> {
     if let Some(existing) = resolve_whisper_assets(app) {
         return Ok(existing);
@@ -400,12 +452,7 @@ fn bootstrap_whisper_assets(app: &AppHandle) -> Result<WhisperAssets, String> {
         }
     }
 
-    if !assets.ffmpeg_path.exists() {
-        let zip_path = writable_base.join("lib").join("ffmpeg-bin-x64.zip");
-        download_to_path(FFMPEG_RELEASE_ZIP_URL, &zip_path)?;
-        unpack_zip_to_dir(&zip_path, &assets.lib_dir)?;
-        let _ = fs::remove_file(&zip_path);
-    }
+    let ffmpeg_path = ensure_ffmpeg(app)?;
 
     if !assets.model_path.exists() {
         download_to_path(WHISPER_MODEL_URL, &assets.model_path)?;
@@ -415,13 +462,13 @@ fn bootstrap_whisper_assets(app: &AppHandle) -> Result<WhisperAssets, String> {
         "Whisper bootstrap finished but no whisper executable was found (expected whisper-cli.exe, main.exe, or whisper.exe).".to_string()
     })?;
 
-    if !assets.ffmpeg_path.exists() || !assets.model_path.exists() {
-        return Err("Whisper bootstrap finished but required files are still missing (ffmpeg.exe / model).".to_string());
+    if !assets.model_path.exists() {
+        return Err("Whisper bootstrap finished but the speech model is still missing.".to_string());
     }
 
     Ok(WhisperAssets {
         whisper_cli_path,
-        ffmpeg_path: assets.ffmpeg_path,
+        ffmpeg_path,
         model_path: assets.model_path,
         lib_dir: assets.lib_dir,
         weights_dir: assets.weights_dir,
@@ -571,6 +618,89 @@ fn stop_runtime_internal(shared: &SharedRuntime) -> Result<(), String> {
     Ok(())
 }
 
+/// Runs an auxiliary process (ffmpeg / whisper) while keeping its handle in the
+/// manager, so a force stop can kill it instead of waiting for it to finish.
+fn run_tracked_command(shared: &SharedRuntime, command: &mut Command) -> Result<bool, String> {
+    let child = command.spawn().map_err(|e| e.to_string())?;
+
+    let id = {
+        let mut manager = shared
+            .lock()
+            .map_err(|_| "Runtime lock poisoned".to_string())?;
+        let id = manager.next_aux_id;
+        manager.next_aux_id = manager.next_aux_id.wrapping_add(1);
+        manager.aux_children.push((id, child));
+        id
+    };
+
+    loop {
+        {
+            let mut manager = shared
+                .lock()
+                .map_err(|_| "Runtime lock poisoned".to_string())?;
+
+            let position = manager.aux_children.iter().position(|(cid, _)| *cid == id);
+
+            let Some(position) = position else {
+                // A force stop already reaped this child.
+                return Err("Cancelled by user.".to_string());
+            };
+
+            if manager.force_stop_requested {
+                let (_, mut child) = manager.aux_children.remove(position);
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("Cancelled by user.".to_string());
+            }
+
+            match manager.aux_children[position].1.try_wait() {
+                Ok(Some(status)) => {
+                    manager.aux_children.remove(position);
+                    return Ok(status.success());
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    manager.aux_children.remove(position);
+                    return Err(error.to_string());
+                }
+            }
+        }
+
+        thread::sleep(Duration::from_millis(80));
+    }
+}
+
+fn force_stop_internal(shared: &SharedRuntime) -> Result<(), String> {
+    let (mut aux_children, main_child) = {
+        let mut manager = shared
+            .lock()
+            .map_err(|_| "Runtime lock poisoned".to_string())?;
+        manager.cancel_requested = true;
+        manager.force_stop_requested = true;
+        (
+            std::mem::take(&mut manager.aux_children),
+            manager.child.take(),
+        )
+    };
+
+    for (_, child) in aux_children.iter_mut() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    if let Some(mut child) = main_child {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    let mut manager = shared
+        .lock()
+        .map_err(|_| "Runtime lock poisoned".to_string())?;
+    manager.busy = false;
+    manager.last_error = Some("Runtime was force stopped.".to_string());
+    Ok(())
+}
+
 fn start_runtime_if_needed(app: &AppHandle, shared: &SharedRuntime) -> Result<(), String> {
     let config = {
         let mut manager = shared.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
@@ -665,18 +795,36 @@ fn deterministic_title_from_path(path: &Path, fallback: &str) -> String {
     }
 }
 
+/// Connectives that read as truncation artifacts when the word limit cuts a
+/// title mid-phrase ("Review Meeting Database Migration Timeline and").
+const TRAILING_FILLER_WORDS: &[&str] = &[
+    "and", "or", "the", "a", "an", "of", "for", "to", "in", "on", "with", "at", "by", "from", "as",
+    "that", "this", "is", "are", "was", "were", "its", "their",
+];
+
 fn sanitize_filename_base_with_limit(raw: &str, fallback: &str, max_words: usize) -> String {
     let mut cleaned = raw
         .replace(['\r', '\n', '\t'], " ")
         .replace(['"', '\'', '`'], " ")
         .replace(['\\', '/', ':', '*', '?', '<', '>', '|'], " ");
 
-    cleaned = cleaned
+    let mut words = cleaned
         .split_whitespace()
         .take(max_words.max(1))
-        .collect::<Vec<_>>()
-        .join(" ");
+        .collect::<Vec<_>>();
 
+    while words.len() > 1 {
+        let last = words[words.len() - 1]
+            .trim_matches(|c: char| !c.is_alphanumeric())
+            .to_ascii_lowercase();
+        if TRAILING_FILLER_WORDS.contains(&last.as_str()) {
+            words.pop();
+        } else {
+            break;
+        }
+    }
+
+    cleaned = words.join(" ");
     cleaned = cleaned.trim_matches('.').trim().to_string();
     if cleaned.is_empty() {
         cleaned = fallback.to_string();
@@ -725,18 +873,24 @@ impl FilenameStyle {
         }
     }
 
-    fn prompt_instruction(self) -> String {
+    /// `subject` names the medium being described ("image", "video", ...) so the
+    /// instruction reads correctly for whichever branch is calling it.
+    fn prompt_instruction_for(self, subject: &str) -> String {
         let limit = match self {
             Self::Short => "a short filename title (max 4 words)",
             Self::Average => "a concise filename title (max 8 words)",
             Self::Long => "a detailed filename title (max 14 words)",
         };
         format!(
-            "Generate {limit} that names the main subject and action or context of this image. \
+            "Generate {limit} that names the main subject and action or context of this {subject}. \
              Use plain descriptive words a person would use to file this. \
-             Do not include phrases like 'image of', 'a photo showing', or similar preambles. \
+             Do not include phrases like 'image of', 'a recording of', or similar preambles. \
              Do not include a file extension. Return the title only, nothing else."
         )
+    }
+
+    fn prompt_instruction(self) -> String {
+        self.prompt_instruction_for("image")
     }
 }
 
@@ -915,7 +1069,11 @@ fn encode_image_file_to_jpeg_base64(path: &Path) -> Result<String, String> {
     Ok(BASE64.encode(out))
 }
 
-fn encode_image_file_to_jpeg_base64_via_ffmpeg(path: &Path, ffmpeg_path: &Path) -> Result<String, String> {
+fn encode_image_file_to_jpeg_base64_via_ffmpeg(
+    shared: &SharedRuntime,
+    path: &Path,
+    ffmpeg_path: &Path,
+) -> Result<String, String> {
     let now_nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -928,7 +1086,7 @@ fn encode_image_file_to_jpeg_base64_via_ffmpeg(path: &Path, ffmpeg_path: &Path) 
 
     let mut command = Command::new(ffmpeg_path);
     configure_process_command(&mut command);
-    let status = command
+    command
         .arg("-y")
         .arg("-i")
         .arg(path)
@@ -939,11 +1097,12 @@ fn encode_image_file_to_jpeg_base64_via_ffmpeg(path: &Path, ffmpeg_path: &Path) 
         .arg(&frame_path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(|e| format!("Failed to run ffmpeg for image conversion: {}", e))?;
+        .stderr(Stdio::null());
 
-    if !status.success() || !frame_path.exists() {
+    let success = run_tracked_command(shared, &mut command)?;
+
+    if !success || !frame_path.exists() {
+        let _ = fs::remove_file(&frame_path);
         return Err("ffmpeg image conversion failed.".to_string());
     }
 
@@ -952,11 +1111,21 @@ fn encode_image_file_to_jpeg_base64_via_ffmpeg(path: &Path, ffmpeg_path: &Path) 
     Ok(BASE64.encode(bytes))
 }
 
-fn image_is_probably_webp(path: &Path) -> bool {
+fn path_has_extension(path: &Path, extensions: &[&str]) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
-        .map(|value| value.eq_ignore_ascii_case("webp"))
+        .map(|value| {
+            extensions
+                .iter()
+                .any(|candidate| value.eq_ignore_ascii_case(candidate))
+        })
         .unwrap_or(false)
+}
+
+/// Formats that carry animation and should be sampled by ffmpeg rather than
+/// decoded as a single still frame.
+fn image_is_animated_container(path: &Path) -> bool {
+    path_has_extension(path, &["gif", "webp", "apng", "avif"])
 }
 
 fn generate_title_from_text(
@@ -993,12 +1162,12 @@ fn generate_title_from_video_context(
     let context_text = match transcript.map(str::trim).filter(|v| !v.is_empty()) {
         Some(text) => format!(
             "{} Use both the visual scene and speech transcript to produce the filename title.\nTranscript:\n{}",
-            style.prompt_instruction(),
+            style.prompt_instruction_for("video"),
             text.chars().take(5000).collect::<String>()
         ),
         None => format!(
             "{} Use visual scene details to produce the filename title.",
-            style.prompt_instruction()
+            style.prompt_instruction_for("video")
         ),
     };
 
@@ -1041,7 +1210,7 @@ fn generate_title_from_audio_transcript(
                 "role": "user",
                 "content": format!(
                     "{} Use this transcript to produce an informative filename title. Return title only.\n\n{}",
-                    style.prompt_instruction(),
+                    style.prompt_instruction_for("audio recording"),
                     snippet
                 )
             }
@@ -1050,10 +1219,15 @@ fn generate_title_from_audio_transcript(
     )
 }
 
-fn extract_audio_wav(media_path: &Path, ffmpeg_path: &Path, output_wav: &Path) -> Result<(), String> {
+fn extract_audio_wav(
+    shared: &SharedRuntime,
+    media_path: &Path,
+    ffmpeg_path: &Path,
+    output_wav: &Path,
+) -> Result<(), String> {
     let mut command = Command::new(ffmpeg_path);
     configure_process_command(&mut command);
-    let status = command
+    command
         .arg("-y")
         .arg("-i")
         .arg(media_path)
@@ -1067,18 +1241,24 @@ fn extract_audio_wav(media_path: &Path, ffmpeg_path: &Path, output_wav: &Path) -
         .arg(output_wav)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(|e| format!("Failed to run ffmpeg for audio extraction: {}", e))?;
+        .stderr(Stdio::null());
 
-    if status.success() && output_wav.exists() {
+    let success = run_tracked_command(shared, &mut command)?;
+
+    if success && output_wav.exists() {
         Ok(())
     } else {
         Err("ffmpeg audio extraction failed.".to_string())
     }
 }
 
-fn extract_video_frame_base64(media_path: &Path, ffmpeg_path: &Path) -> Result<String, String> {
+/// Picks a representative frame from any animated source (video or animated
+/// GIF/WebP) rather than the first frame, which is very often black or a fade-in.
+fn extract_representative_frame_base64(
+    shared: &SharedRuntime,
+    media_path: &Path,
+    ffmpeg_path: &Path,
+) -> Result<String, String> {
     let now_nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -1091,22 +1271,25 @@ fn extract_video_frame_base64(media_path: &Path, ffmpeg_path: &Path) -> Result<S
 
     let mut command = Command::new(ffmpeg_path);
     configure_process_command(&mut command);
-    let status = command
+    command
         .arg("-y")
         .arg("-i")
         .arg(media_path)
+        .arg("-an")
+        .arg("-sn")
         .arg("-vf")
-        .arg("thumbnail,scale=960:-1")
+        .arg("thumbnail=300,scale='min(896,iw)':-2")
         .arg("-frames:v")
         .arg("1")
         .arg(&frame_path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(|e| format!("Failed to run ffmpeg for frame extraction: {}", e))?;
+        .stderr(Stdio::null());
 
-    if !status.success() || !frame_path.exists() {
+    let success = run_tracked_command(shared, &mut command)?;
+
+    if !success || !frame_path.exists() {
+        let _ = fs::remove_file(&frame_path);
         return Err("ffmpeg frame extraction failed.".to_string());
     }
 
@@ -1115,7 +1298,11 @@ fn extract_video_frame_base64(media_path: &Path, ffmpeg_path: &Path) -> Result<S
     Ok(BASE64.encode(bytes))
 }
 
-fn transcribe_media_with_whisper(media_path: &Path, whisper: &WhisperAssets) -> Result<String, String> {
+fn transcribe_media_with_whisper(
+    shared: &SharedRuntime,
+    media_path: &Path,
+    whisper: &WhisperAssets,
+) -> Result<String, String> {
     let temp_root = std::env::temp_dir();
     let now_nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1130,7 +1317,7 @@ fn transcribe_media_with_whisper(media_path: &Path, whisper: &WhisperAssets) -> 
     let out_prefix = temp_root.join(stamp);
     let out_txt = out_prefix.with_extension("txt");
 
-    extract_audio_wav(media_path, &whisper.ffmpeg_path, &wav_path)?;
+    extract_audio_wav(shared, media_path, &whisper.ffmpeg_path, &wav_path)?;
 
     let run_whisper = |args: &[&str]| -> Result<bool, String> {
         let mut command = Command::new(&whisper.whisper_cli_path);
@@ -1151,10 +1338,7 @@ fn transcribe_media_with_whisper(media_path: &Path, whisper: &WhisperAssets) -> 
             .stderr(Stdio::null())
             .current_dir(&whisper.lib_dir);
 
-        let status = command
-            .status()
-            .map_err(|e| format!("Failed to run whisper executable: {}", e))?;
-        Ok(status.success())
+        run_tracked_command(shared, &mut command)
     };
 
     let primary_ok = run_whisper(&["--output-txt", "--output-file", out_prefix.to_string_lossy().as_ref(), "-nt"])?;
@@ -1188,9 +1372,10 @@ fn transcribe_media_with_whisper(media_path: &Path, whisper: &WhisperAssets) -> 
 }
 
 fn process_batch_item(
+    shared: &SharedRuntime,
     client: &Client,
     config: &RuntimeConfig,
-    whisper_assets: Option<&WhisperAssets>,
+    media: &MediaAssets,
     request: &RuntimeBatchRequest,
 ) -> RuntimeBatchResult {
     let path = PathBuf::from(&request.path);
@@ -1218,35 +1403,58 @@ fn process_batch_item(
 
     let model_result = match kind.as_str() {
         "image" => {
-            match encode_image_file_to_jpeg_base64(&path) {
-                Ok(base64) => generate_title_from_image(client, config, &base64, style),
-                Err(primary_error) => {
-                    if let Some(whisper) = whisper_assets {
-                        match encode_image_file_to_jpeg_base64_via_ffmpeg(&path, &whisper.ffmpeg_path) {
-                            Ok(base64) => generate_title_from_image(client, config, &base64, style),
-                            Err(ffmpeg_error) => Err(format!("{}; ffmpeg fallback failed: {}", primary_error, ffmpeg_error)),
+            let ffmpeg = media.ffmpeg_path.as_deref();
+
+            // Animated sources (GIF and friends) get a representative frame from
+            // ffmpeg; decoding them as a still yields frame 1, which is often blank.
+            let animated_frame = if image_is_animated_container(&path) {
+                ffmpeg.and_then(|ffmpeg_path| {
+                    extract_representative_frame_base64(shared, &path, ffmpeg_path).ok()
+                })
+            } else {
+                None
+            };
+
+            match animated_frame {
+                Some(base64) => generate_title_from_image(client, config, &base64, style),
+                None => match encode_image_file_to_jpeg_base64(&path) {
+                    Ok(base64) => generate_title_from_image(client, config, &base64, style),
+                    Err(primary_error) => match ffmpeg {
+                        Some(ffmpeg_path) => {
+                            match encode_image_file_to_jpeg_base64_via_ffmpeg(shared, &path, ffmpeg_path) {
+                                Ok(base64) => generate_title_from_image(client, config, &base64, style),
+                                Err(ffmpeg_error) => Err(format!(
+                                    "{}; ffmpeg fallback failed: {}",
+                                    primary_error, ffmpeg_error
+                                )),
+                            }
                         }
-                    } else if image_is_probably_webp(&path) {
-                        Err(format!("{}; ffmpeg is unavailable for webp conversion fallback", primary_error))
-                    } else {
-                        Err(primary_error)
-                    }
-                }
+                        None => Err(format!(
+                            "{}; ffmpeg is unavailable for conversion fallback",
+                            primary_error
+                        )),
+                    },
+                },
             }
         }
         "video" => {
-            let whisper = match whisper_assets {
-                Some(assets) => assets,
+            let ffmpeg_path = match media.ffmpeg_path.as_deref() {
+                Some(path) => path,
                 None => return RuntimeBatchResult {
                     ind: request.ind,
                     suggested_name: Some(fallback),
-                    error: Some("Whisper/ffmpeg assets are missing for video processing".to_string()),
+                    error: Some("ffmpeg is missing for video processing".to_string()),
                     source: "fallback".to_string(),
                 },
             };
 
-            let transcript = transcribe_media_with_whisper(&path, whisper).ok();
-            let frame = extract_video_frame_base64(&path, &whisper.ffmpeg_path)
+            // Speech is optional: a video still names well from its visuals alone.
+            let transcript = media
+                .whisper
+                .as_ref()
+                .and_then(|whisper| transcribe_media_with_whisper(shared, &path, whisper).ok());
+
+            let frame = extract_representative_frame_base64(shared, &path, ffmpeg_path)
                 .or_else(|_| {
                     request
                         .video_frame_base64
@@ -1267,17 +1475,17 @@ fn process_batch_item(
             }
         }
         "audio" => {
-            let whisper = match whisper_assets {
+            let whisper = match media.whisper.as_ref() {
                 Some(assets) => assets,
                 None => return RuntimeBatchResult {
                     ind: request.ind,
                     suggested_name: Some(fallback),
-                    error: Some("Whisper/ffmpeg assets are missing for audio processing".to_string()),
+                    error: Some("Speech model is missing for audio processing".to_string()),
                     source: "fallback".to_string(),
                 },
             };
 
-            transcribe_media_with_whisper(&path, whisper)
+            transcribe_media_with_whisper(shared, &path, whisper)
                 .and_then(|text| generate_title_from_audio_transcript(client, config, &text, style))
         }
         "txt" => fs::read_to_string(&path)
@@ -1437,6 +1645,216 @@ fn apply_rename_items(requests: Vec<RenameRequest>) -> Vec<RenameResult> {
     results
 }
 
+const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "bmp", "gif", "tiff", "webp"];
+const VIDEO_EXTENSIONS: &[&str] = &["mp4", "avi", "mov", "mkv", "webm", "wmv", "flv", "m4v"];
+const AUDIO_EXTENSIONS: &[&str] = &["mp3", "wav", "m4a", "aac", "flac", "ogg", "wma", "opus"];
+const TEXT_EXTENSIONS: &[&str] = &["txt"];
+
+const THUMBNAIL_MAX_WIDTH: u32 = 320;
+const THUMBNAIL_MAX_HEIGHT: u32 = 192;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FolderEntry {
+    name: String,
+    path: String,
+    extension: String,
+    kind: String,
+    filter_type: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FolderListing {
+    files: Vec<FolderEntry>,
+    subfolders: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ThumbnailResult {
+    path: String,
+    data_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeHealth {
+    running: bool,
+    busy: bool,
+    responsive: bool,
+    last_error: Option<String>,
+}
+
+fn classify_extension(extension: &str) -> (&'static str, &'static str) {
+    let lower = extension.to_ascii_lowercase();
+    let lower = lower.trim_start_matches('.');
+
+    if IMAGE_EXTENSIONS.contains(&lower) {
+        ("image", "image")
+    } else if VIDEO_EXTENSIONS.contains(&lower) {
+        ("video", "video")
+    } else if AUDIO_EXTENSIONS.contains(&lower) {
+        ("audio", "audio")
+    } else if TEXT_EXTENSIONS.contains(&lower) {
+        ("txt", "text")
+    } else {
+        ("fallback", "other")
+    }
+}
+
+/// Lists a folder natively. Doing this in Rust keeps folders with thousands of
+/// files responsive: nothing but names crosses the IPC boundary.
+#[tauri::command]
+fn list_folder(path: String) -> Result<FolderListing, String> {
+    let root = PathBuf::from(&path);
+    if !root.is_dir() {
+        return Err(format!("Not a folder: {}", path));
+    }
+
+    let mut files: Vec<FolderEntry> = Vec::new();
+    let mut subfolders: Vec<String> = Vec::new();
+
+    for entry in fs::read_dir(&root).map_err(|e| e.to_string())? {
+        let Ok(entry) = entry else { continue };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+
+        let entry_path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.is_empty() {
+            continue;
+        }
+
+        if file_type.is_dir() {
+            subfolders.push(entry_path.to_string_lossy().to_string());
+            continue;
+        }
+
+        let extension = entry_path
+            .extension()
+            .map(|value| format!(".{}", value.to_string_lossy().to_ascii_lowercase()))
+            .unwrap_or_default();
+        let (kind, filter_type) = classify_extension(&extension);
+
+        files.push(FolderEntry {
+            name,
+            path: entry_path.to_string_lossy().to_string(),
+            extension,
+            kind: kind.to_string(),
+            filter_type: filter_type.to_string(),
+        });
+    }
+
+    files.sort_by_key(|entry| entry.name.to_lowercase());
+    subfolders.sort_by_key(|entry| entry.to_lowercase());
+
+    Ok(FolderListing { files, subfolders })
+}
+
+fn generate_thumbnail_data_url(path: &Path) -> Result<String, String> {
+    let image = image::ImageReader::open(path)
+        .map_err(|e| e.to_string())?
+        .with_guessed_format()
+        .map_err(|e| e.to_string())?
+        .decode()
+        .map_err(|e| e.to_string())?;
+
+    let thumbnail = image.thumbnail(THUMBNAIL_MAX_WIDTH, THUMBNAIL_MAX_HEIGHT);
+
+    let mut buffer = Vec::new();
+    image::DynamicImage::ImageRgb8(thumbnail.to_rgb8())
+        .write_to(&mut std::io::Cursor::new(&mut buffer), ImageFormat::Jpeg)
+        .map_err(|e| e.to_string())?;
+
+    Ok(format!("data:image/jpeg;base64,{}", BASE64.encode(buffer)))
+}
+
+/// Decodes thumbnails in parallel on native threads. The frontend only asks for
+/// the page it is showing, so this stays bounded no matter how large the folder is.
+#[tauri::command]
+async fn generate_thumbnails(paths: Vec<String>) -> Result<Vec<ThumbnailResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let slots: Vec<Mutex<Option<String>>> = paths.iter().map(|_| Mutex::new(None)).collect();
+        let cursor = AtomicUsize::new(0);
+        let workers = num_cpus::get().clamp(1, 8).min(paths.len().max(1));
+
+        thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| loop {
+                    let index = cursor.fetch_add(1, Ordering::Relaxed);
+                    if index >= paths.len() {
+                        break;
+                    }
+
+                    let value = generate_thumbnail_data_url(Path::new(&paths[index])).ok();
+                    if let Ok(mut slot) = slots[index].lock() {
+                        *slot = value;
+                    }
+                });
+            }
+        });
+
+        paths
+            .into_iter()
+            .zip(slots)
+            .map(|(path, slot)| ThumbnailResult {
+                path,
+                data_url: slot.into_inner().unwrap_or(None),
+            })
+            .collect()
+    })
+    .await
+    .map_err(|error| error.to_string())
+}
+
+/// Reports whether the model server is up and actually answering, which backs
+/// the status dot in the title bar.
+#[tauri::command]
+async fn runtime_health(state: State<'_, SharedRuntime>) -> Result<RuntimeHealth, String> {
+    let shared = state.inner().clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let (running, busy, last_error, config) = {
+            let mut manager = shared
+                .lock()
+                .map_err(|_| "Runtime lock poisoned".to_string())?;
+            refresh_child_state(&mut manager);
+            (
+                manager.child.is_some(),
+                manager.busy,
+                manager.last_error.clone(),
+                manager.config.clone(),
+            )
+        };
+
+        let responsive = running
+            && Client::builder()
+                .timeout(Duration::from_millis(1500))
+                .build()
+                .ok()
+                .and_then(|client| client.get(runtime_health_url(&config)).send().ok())
+                .map(|response| response.status().is_success())
+                .unwrap_or(false);
+
+        Ok(RuntimeHealth {
+            running,
+            busy,
+            responsive,
+            last_error,
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+fn runtime_force_stop(app: AppHandle, state: State<'_, SharedRuntime>) -> Result<RuntimeStatus, String> {
+    force_stop_internal(state.inner())?;
+    runtime_status_snapshot(&app, state.inner())
+}
+
 #[tauri::command]
 fn runtime_get_status(app: AppHandle, state: State<'_, SharedRuntime>) -> Result<RuntimeStatus, String> {
     runtime_status_snapshot(&app, state.inner())
@@ -1525,6 +1943,7 @@ async fn runtime_generate_batch(
 
         manager.busy = true;
         manager.cancel_requested = false;
+        manager.force_stop_requested = false;
         manager.last_error = None;
     }
 
@@ -1542,24 +1961,36 @@ async fn runtime_generate_batch(
         };
 
         let client = build_client(config.request_timeout_sec)?;
-        let needs_whisper = requests
-            .iter()
-            .any(|request| {
-                let kind = request.kind.trim().to_ascii_lowercase();
-                if matches!(kind.as_str(), "audio" | "video") {
-                    return true;
-                }
-                kind == "image"
-                    && Path::new(&request.path)
-                        .extension()
-                        .and_then(|ext| ext.to_str())
-                        .map(|ext| ext.eq_ignore_ascii_case("webp"))
-                        .unwrap_or(false)
+
+        // Speech transcription is only worth its large model download when there
+        // is actually audio to read.
+        let needs_whisper = requests.iter().any(|request| {
+            matches!(
+                request.kind.trim().to_ascii_lowercase().as_str(),
+                "audio" | "video"
+            )
+        });
+        let needs_ffmpeg = needs_whisper
+            || requests.iter().any(|request| {
+                request.kind.trim().eq_ignore_ascii_case("image")
+                    && image_is_animated_container(Path::new(&request.path))
             });
-        let whisper_assets = if needs_whisper {
-            Some(bootstrap_whisper_assets(&app_handle)?)
+
+        // A missing helper degrades individual files to a fallback name rather
+        // than failing the whole batch.
+        let whisper = if needs_whisper {
+            bootstrap_whisper_assets(&app_handle).ok()
         } else {
             None
+        };
+        let ffmpeg_path = match whisper.as_ref() {
+            Some(assets) => Some(assets.ffmpeg_path.clone()),
+            None if needs_ffmpeg => ensure_ffmpeg(&app_handle).ok(),
+            None => None,
+        };
+        let media = MediaAssets {
+            ffmpeg_path,
+            whisper,
         };
         let total = requests.len();
         let mut processed = 0;
@@ -1570,14 +2001,14 @@ async fn runtime_generate_batch(
                 let manager = shared_for_task
                     .lock()
                     .map_err(|_| "Runtime lock poisoned".to_string())?;
-                manager.cancel_requested
+                manager.cancel_requested || manager.force_stop_requested
             };
 
             if is_cancelled {
                 break;
             }
 
-            let result = process_batch_item(&client, &config, whisper_assets.as_ref(), &request);
+            let result = process_batch_item(&shared_for_task, &client, &config, &media, &request);
 
             processed += 1;
 
@@ -1690,7 +2121,11 @@ pub fn run() {
             runtime_start,
             runtime_stop,
             runtime_cancel_batch,
+            runtime_force_stop,
             runtime_generate_batch,
+            runtime_health,
+            list_folder,
+            generate_thumbnails,
             apply_renames,
             runtime_probe
         ])
