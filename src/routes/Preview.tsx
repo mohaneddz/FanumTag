@@ -1,5 +1,6 @@
-import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack } from "solid-js";
 import { useLocation, useNavigate } from "@solidjs/router";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { desktopDir, documentDir, downloadDir, homeDir, pictureDir, videoDir } from "@tauri-apps/api/path";
 import {
@@ -140,6 +141,7 @@ export default function Preview() {
   const [subfolders, setSubfolders] = createSignal<string[]>(cached?.subfolders ?? []);
   const [toast, setToast] = createSignal<{ message: string; variant: "success" | "error" | "warning" | "info" } | null>(null);
   const [thumbnails, setThumbnails] = createSignal<Map<string, string>>(new Map(cached?.thumbnails ?? []));
+  const [previewItem, setPreviewItem] = createSignal<WorkspaceFile | null>(null);
   const [stopRequested, setStopRequested] = createSignal(false);
   const [canForceStop, setCanForceStop] = createSignal(false);
   let activeFolderLoadId = 0;
@@ -730,7 +732,7 @@ export default function Preview() {
     untrack(() => {
       const known = thumbnails();
       const wanted = page
-        .filter((row) => row.kind === "image" && !known.has(row.path) && !pendingThumbnails.has(row.path))
+        .filter((row) => (row.kind === "image" || row.kind === "video") && !known.has(row.path) && !pendingThumbnails.has(row.path))
         .map((row) => row.path);
 
       if (wanted.length === 0) return;
@@ -789,8 +791,14 @@ export default function Preview() {
       cleanup = unlisten;
     });
 
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPreviewItem(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+
     onCleanup(() => {
       cleanup?.();
+      window.removeEventListener("keydown", onKeyDown);
     });
   });
 
@@ -824,6 +832,50 @@ export default function Preview() {
     <section class="h-full overflow-auto xl:overflow-hidden p-3 md:p-4">
       {toast() && <Toast message={toast()!.message} variant={toast()!.variant} onClose={() => setToast(null)} />}
 
+      <Show when={previewItem()}>
+        {(item) => {
+          const src = convertFileSrc(item().path);
+          return (
+            <div
+              class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-md"
+              role="dialog"
+              aria-modal="true"
+              aria-label={`Preview ${item().name}`}
+              onClick={(event) => {
+                if (event.target === event.currentTarget) setPreviewItem(null);
+              }}
+            >
+              <div class="relative flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/15 bg-slate-900 shadow-2xl shadow-black/60">
+                <div class="flex items-center justify-between gap-4 border-b border-white/10 px-4 py-3">
+                  <div class="min-w-0">
+                    <div class="truncate text-sm font-medium text-slate-100">{item().name}</div>
+                    <div class="text-[11px] uppercase tracking-[0.12em] text-slate-400">{item().filterType} {item().extension}</div>
+                  </div>
+                  <button class="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.04] hover:bg-white/[0.1]" onClick={() => setPreviewItem(null)} aria-label="Close preview">
+                    <X size={16} />
+                  </button>
+                </div>
+                <div class="flex min-h-[260px] flex-1 items-center justify-center bg-black/45 p-4">
+                  <Show when={item().kind === "image"} fallback={
+                    <Show when={item().kind === "video"} fallback={
+                      <Show when={item().kind === "audio"} fallback={
+                        <div class="text-center text-sm text-slate-400"><File size={30} class="mx-auto mb-3" />Preview is not available for this file type.</div>
+                      }>
+                        <audio class="w-full max-w-xl" src={src} controls autoplay />
+                      </Show>
+                    }>
+                      <video class="max-h-[75vh] max-w-full rounded-lg" src={src} controls autoplay />
+                    </Show>
+                  }>
+                    <img class="max-h-[75vh] max-w-full rounded-lg object-contain" src={src} alt={item().name} />
+                  </Show>
+                </div>
+              </div>
+            </div>
+          );
+        }}
+      </Show>
+
       <div class="h-full min-h-full grid grid-cols-1 xl:grid-cols-[240px_1fr] 2xl:grid-cols-[250px_1fr_320px] gap-3 items-start xl:items-stretch">
         <aside class="rounded-2xl border border-white/10 bg-slate-900/60 backdrop-blur-xl p-3 flex flex-col gap-3 min-h-0 xl:h-full grain-surface">
           <div class="grid grid-cols-[1fr_40px] gap-2">
@@ -843,54 +895,56 @@ export default function Preview() {
             </button>
           </div>
 
-          <div class="space-y-1 min-h-0">
-            <div class="text-[11px] uppercase tracking-[0.18em] text-slate-400">Quick Access</div>
-            <div class="max-h-36 sm:max-h-44 xl:max-h-56 overflow-auto space-y-1 pr-1">
-              {quickAccess().map((item) => {
-                const Icon = item.icon;
-                const active = folderPath().toLowerCase() === item.path.toLowerCase();
-                return (
-                  <button
-                    class={`w-full h-8 px-2 rounded-md border text-xs flex items-center gap-2 transition ${
-                      active
-                        ? "border-pink-300/50 bg-pink-400/15 text-pink-100"
-                        : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]"
-                    }`}
-                    onClick={() => setFolderQuery(item.path)}
-                  >
-                    <Icon size={12} />
-                    <span class="truncate">{item.label}</span>
-                  </button>
-                );
-              })}
+          <div class="min-h-0 flex-1 overflow-auto space-y-3 pr-1">
+            <div class="space-y-1 shrink-0">
+              <div class="text-[11px] uppercase tracking-[0.18em] text-slate-400">Quick Access</div>
+              <div class="space-y-1">
+                {quickAccess().map((item) => {
+                  const Icon = item.icon;
+                  const active = folderPath().toLowerCase() === item.path.toLowerCase();
+                  return (
+                    <button
+                      class={`w-full h-8 px-2 rounded-md border text-xs flex items-center gap-2 transition ${
+                        active
+                          ? "border-pink-300/50 bg-pink-400/15 text-pink-100"
+                          : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]"
+                      }`}
+                      onClick={() => setFolderQuery(item.path)}
+                    >
+                      <Icon size={12} />
+                      <span class="truncate">{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div class="space-y-1 shrink-0">
+              <div class="text-[11px] uppercase tracking-[0.18em] text-slate-400">Subfolders</div>
+              <div class="space-y-1">
+                {subfolders().length === 0 && <div class="text-xs text-slate-500 px-1 py-2">No subfolders</div>}
+                {subfolders().map((path) => {
+                  const label = fileNameFromPath(path);
+                  const active = folderPath().toLowerCase() === path.toLowerCase();
+                  return (
+                    <button
+                      class={`w-full h-8 px-2 rounded-md border text-xs flex items-center gap-2 transition ${
+                        active
+                          ? "border-pink-300/50 bg-pink-400/15 text-pink-100"
+                          : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]"
+                      }`}
+                      onClick={() => setFolderQuery(path)}
+                    >
+                      <Folder size={12} />
+                      <span class="truncate">{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
-          <div class="space-y-1 min-h-0">
-            <div class="text-[11px] uppercase tracking-[0.18em] text-slate-400">Subfolders</div>
-            <div class="max-h-36 sm:max-h-44 xl:max-h-56 overflow-auto space-y-1 pr-1">
-              {subfolders().length === 0 && <div class="text-xs text-slate-500 px-1 py-2">No subfolders</div>}
-              {subfolders().map((path) => {
-                const label = fileNameFromPath(path);
-                const active = folderPath().toLowerCase() === path.toLowerCase();
-                return (
-                  <button
-                    class={`w-full h-8 px-2 rounded-md border text-xs flex items-center gap-2 transition ${
-                      active
-                        ? "border-pink-300/50 bg-pink-400/15 text-pink-100"
-                        : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]"
-                    }`}
-                    onClick={() => setFolderQuery(path)}
-                  >
-                    <Folder size={12} />
-                    <span class="truncate">{label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div class="mt-2 xl:mt-auto rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs space-y-1">
+          <div class="mt-2 shrink-0 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs space-y-1">
             <div class="flex justify-between"><span class="text-slate-400">Processed</span><strong>{processedCount()} / {files().length}</strong></div>
             <div class="flex justify-between"><span class="text-slate-400">Ready to Apply</span><strong>{readyCount()}</strong></div>
             <div class="flex justify-between"><span class="text-slate-400">Selected</span><strong>{selectedRows().size}</strong></div>
@@ -971,9 +1025,14 @@ export default function Preview() {
                     {selected && <Check size={12} class="mx-auto" />}
                   </button>
 
-                  <div class="h-12 rounded-lg border border-white/10 bg-slate-950/70 overflow-hidden flex items-center justify-center">
+                  <button
+                    class="h-12 rounded-lg border border-white/10 bg-slate-950/70 overflow-hidden flex items-center justify-center hover:border-pink-300/60 focus:outline-none focus:ring-2 focus:ring-pink-300/50"
+                    onClick={() => setPreviewItem(item)}
+                    title={`Preview ${item.name}`}
+                    aria-label={`Preview ${item.name}`}
+                  >
                     {thumbnail ? <img src={thumbnail} alt={item.name} class="h-full w-full object-cover" /> : <Icon size={16} class="text-slate-400" />}
-                  </div>
+                  </button>
 
                   <div class="min-w-0">
                     <div class="truncate text-sm font-medium">{item.name}</div>

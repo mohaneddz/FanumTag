@@ -1728,11 +1728,16 @@ fn classify_extension(extension: &str) -> (&'static str, &'static str) {
 /// Lists a folder natively. Doing this in Rust keeps folders with thousands of
 /// files responsive: nothing but names crosses the IPC boundary.
 #[tauri::command]
-fn list_folder(path: String) -> Result<FolderListing, String> {
+fn list_folder(app: AppHandle, path: String) -> Result<FolderListing, String> {
     let root = PathBuf::from(&path);
     if !root.is_dir() {
         return Err(format!("Not a folder: {}", path));
     }
+    // The webview can only stream media from folders the user has opened.
+    // This keeps the asset protocol scoped while allowing modal playback.
+    app.asset_protocol_scope()
+        .allow_directory(&root, true)
+        .map_err(|error| error.to_string())?;
 
     let mut files: Vec<FolderEntry> = Vec::new();
     let mut subfolders: Vec<String> = Vec::new();
@@ -1793,11 +1798,63 @@ fn generate_thumbnail_data_url(path: &Path) -> Result<String, String> {
     Ok(format!("data:image/jpeg;base64,{}", BASE64.encode(buffer)))
 }
 
+fn generate_video_thumbnail_data_url(path: &Path, ffmpeg_path: &Path) -> Result<String, String> {
+    let now_nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let frame_path = std::env::temp_dir().join(format!(
+        "fanumtag-thumbnail-{}-{}.jpg",
+        std::process::id(),
+        now_nanos
+    ));
+
+    let mut command = Command::new(ffmpeg_path);
+    configure_process_command(&mut command);
+    command
+        .arg("-y")
+        .arg("-i")
+        .arg(path)
+        .arg("-an")
+        .arg("-sn")
+        .arg("-vf")
+        .arg("thumbnail=120,scale=320:-2:force_original_aspect_ratio=decrease")
+        .arg("-frames:v")
+        .arg("1")
+        .arg(&frame_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    let result = command.status().map_err(|error| error.to_string());
+    if !matches!(result, Ok(status) if status.success()) || !frame_path.exists() {
+        let _ = fs::remove_file(&frame_path);
+        return Err("ffmpeg thumbnail extraction failed.".to_string());
+    }
+
+    let thumbnail = generate_thumbnail_data_url(&frame_path);
+    let _ = fs::remove_file(&frame_path);
+    thumbnail
+}
+
 /// Decodes thumbnails in parallel on native threads. The frontend only asks for
 /// the page it is showing, so this stays bounded no matter how large the folder is.
 #[tauri::command]
-async fn generate_thumbnails(paths: Vec<String>) -> Result<Vec<ThumbnailResult>, String> {
+async fn generate_thumbnails(app: AppHandle, paths: Vec<String>) -> Result<Vec<ThumbnailResult>, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        // Provision ffmpeg once when this page contains video files, then let
+        // the workers extract their frame previews in parallel.
+        let ffmpeg_path = if paths.iter().any(|path| {
+            let extension = Path::new(path)
+                .extension()
+                .map(|value| format!(".{}", value.to_string_lossy().to_ascii_lowercase()))
+                .unwrap_or_default();
+            classify_extension(&extension).0 == "video"
+        }) {
+            ensure_ffmpeg(&app).ok()
+        } else {
+            None
+        };
         let slots: Vec<Mutex<Option<String>>> = paths.iter().map(|_| Mutex::new(None)).collect();
         let cursor = AtomicUsize::new(0);
         let workers = num_cpus::get().clamp(1, 8).min(paths.len().max(1));
@@ -1810,7 +1867,18 @@ async fn generate_thumbnails(paths: Vec<String>) -> Result<Vec<ThumbnailResult>,
                         break;
                     }
 
-                    let value = generate_thumbnail_data_url(Path::new(&paths[index])).ok();
+                    let path = Path::new(&paths[index]);
+                    let extension = path
+                        .extension()
+                        .map(|value| format!(".{}", value.to_string_lossy().to_ascii_lowercase()))
+                        .unwrap_or_default();
+                    let value = if classify_extension(&extension).0 == "video" {
+                        ffmpeg_path
+                            .as_deref()
+                            .and_then(|ffmpeg| generate_video_thumbnail_data_url(path, ffmpeg).ok())
+                    } else {
+                        generate_thumbnail_data_url(path).ok()
+                    };
                     if let Ok(mut slot) = slots[index].lock() {
                         *slot = value;
                     }
