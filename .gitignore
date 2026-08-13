@@ -1,6 +1,32 @@
-node_modules
-dist
-backend/models/
-backend/output
-backend/__pycache__
+.vscode/
+.idea/
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+node_modules/
+dist/
+
+src-tauri/target/
+
 temp
+
+# AI Models and Weights
+*.gguf
+*.pt
+*.safetensors
+*.bin
+*.onnx
+*.engine
+weights/
+models/
+whisper/
+
+*.pid
+
+# CUDA runtime redistributables (too large for git; place locally before `tauri build`)
+src-tauri/lib/cudart64_*.dll
+src-tauri/lib/cublas64_*.dll
+src-tauri/lib/cublasLt64_*.dll

@@ -25,6 +25,12 @@
     "fs:default",
     "fs:allow-runtime-read-recursive",
     "fs:scope-runtime-recursive",
+    "fs:allow-home-read-recursive",
+    "fs:allow-desktop-read-recursive",
+    "fs:allow-document-read-recursive",
+    "fs:allow-download-read-recursive",
+    "fs:allow-picture-read-recursive",
+    "fs:allow-video-read-recursive",
     "fs:allow-exists",
     "fs:allow-read"
   ]

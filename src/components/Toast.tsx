@@ -1,121 +1,59 @@
 import { Show, createSignal, onCleanup } from "solid-js";
+import { CircleAlert, CircleCheck, CircleX, Info } from "lucide-solid";
 
 type ToastVariant = "success" | "error" | "warning" | "info";
 
 interface ToastProps {
   message: string;
   variant?: ToastVariant;
-  duration?: number; // ms
+  duration?: number;
   onClose?: () => void;
 }
 
-const variantStyles: Record<ToastVariant, string> = {
-  success: "from-success to-success-light-1 border-success",
-  error: "from-error to-error-light-1 border-error",
-  warning: "from-warning to-warning-light-1 border-warning",
-  info: "from-info to-info-light-1 border-info",
+const iconByVariant = {
+  success: CircleCheck,
+  error: CircleX,
+  warning: CircleAlert,
+  info: Info,
+} satisfies Record<ToastVariant, typeof Info>;
+
+const styleByVariant: Record<ToastVariant, string> = {
+  success: "border-emerald-300/40 bg-emerald-500/15 text-emerald-100",
+  error: "border-rose-300/40 bg-rose-500/15 text-rose-100",
+  warning: "border-rose-300/40 bg-rose-500/15 text-rose-100",
+  info: "border-pink-300/40 bg-pink-500/15 text-pink-100",
 };
 
 export default function Toast(props: ToastProps) {
   const [visible, setVisible] = createSignal(true);
+  const variant = props.variant ?? "info";
+  const Icon = iconByVariant[variant];
 
-  // Auto-hide after duration
   if (props.duration !== 0) {
     const timer = setTimeout(() => {
       setVisible(false);
       props.onClose?.();
-    }, props.duration ?? 3000);
+    }, props.duration ?? 3200);
     onCleanup(() => clearTimeout(timer));
   }
 
   return (
     <Show when={visible()}>
-      <div
-        class={`fixed bottom-6 right-6 z-[9999] min-w-[220px] max-w-xs px-5 py-3 rounded-2xl shadow-2xl border-2 bg-gradient-to-r ${variantStyles[props.variant ?? "info"]} text-white font-semibold flex items-center gap-3 transition-all animate-fade-in`}
-        style="backdrop-filter: blur(8px);"
-      >
-        {/* Icon */}
-        <span>
-          {props.variant === "success" && (
-            <svg
-              width="20"
-              height="20"
-              fill="none"
-              viewBox="0 0 20 20"
-            >
-              <circle cx="10" cy="10" r="10" fill="#6A5ACD" />
-              <path
-                d="M6 10.5l2.5 2.5L14 7.5"
-                stroke="#fff"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-          )}
-          {props.variant === "error" && (
-            <svg
-              width="20"
-              height="20"
-              fill="none"
-              viewBox="0 0 20 20"
-            >
-              <circle cx="10" cy="10" r="10" fill="#D6336B" />
-              <path
-                d="M7 7l6 6M13 7l-6 6"
-                stroke="#fff"
-                stroke-width="2"
-                stroke-linecap="round"
-              />
-            </svg>
-          )}
-          {props.variant === "warning" && (
-            <svg
-              width="20"
-              height="20"
-              fill="none"
-              viewBox="0 0 20 20"
-            >
-              <circle cx="10" cy="10" r="10" fill="#C71585" />
-              <path
-                d="M10 6v5M10 13h.01"
-                stroke="#fff"
-                stroke-width="2"
-                stroke-linecap="round"
-              />
-            </svg>
-          )}
-          {props.variant === "info" && (
-            <svg
-              width="20"
-              height="20"
-              fill="none"
-              viewBox="0 0 20 20"
-            >
-              <circle cx="10" cy="10" r="10" fill="#7B68EE" />
-              <path
-                d="M10 7h.01M10 9v4"
-                stroke="#fff"
-                stroke-width="2"
-                stroke-linecap="round"
-              />
-            </svg>
-          )}
-        </span>
-        {/* Message */}
-        <span class="flex-1">{props.message}</span>
-        {/* Close button */}
-        <button
-          class="ml-2 text-white/80 hover:text-white transition"
-          style="background: none; border: none; font-size: 1.2em; cursor: pointer;"
-          onClick={() => {
-            setVisible(false);
-            props.onClose?.();
-          }}
-          aria-label="Close"
-        >
-          ×
-        </button>
+      <div class={`fixed bottom-5 right-5 z-[9999] min-w-[260px] max-w-[480px] rounded-xl border px-4 py-3 shadow-2xl backdrop-blur ${styleByVariant[variant]}`}>
+        <div class="flex items-start gap-2.5">
+          <Icon size={16} class="mt-0.5 shrink-0" />
+          <p class="text-sm leading-snug flex-1">{props.message}</p>
+          <button
+            class="h-6 w-6 rounded-md border border-white/20 text-xs hover:bg-white/10"
+            onClick={() => {
+              setVisible(false);
+              props.onClose?.();
+            }}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
       </div>
     </Show>
   );
