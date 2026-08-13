@@ -16,14 +16,16 @@ try:
     reader_en = easyocr.Reader(['en'], gpu=torch.cuda.is_available())
     reader_ar = easyocr.Reader(['ar'], gpu=torch.cuda.is_available())
 
-    for pkg in ("stopwords", "punkt", "averaged_perceptron_tagger"):
-        nltk.data.find(f"tokenizers/{pkg}")
+    # for pkg in ("stopwords", "punkt", "averaged_perceptron_tagger"):
+    #     nltk.data.find(f"tokenizers/{pkg}")
 except LookupError:
-    nltk.download("stopwords")
-    nltk.download("punkt")
-    nltk.download("averaged_perceptron_tagger")
+    # nltk.download("stopwords")
+    # nltk.download("punkt")
+    # nltk.download("averaged_perceptron_tagger")
+    print('')
 except Exception as e:
-    print(f"Warning: Could not initialize NLP models. Functionality will be limited. Error: {e}")
+    print('')
+    # print(f"Warning: Could not initialize NLP models. Functionality will be limited. Error: {e}")
     kw_model, reader_en, reader_ar = None, None, None
 
 # --- Constants ---

@@ -1,49 +1,23 @@
-import { createSignal, createMemo, createEffect, onMount } from 'solid-js';
+import { createSignal, createMemo, createEffect } from 'solid-js';
 import { readDir } from '@tauri-apps/plugin-fs'; // <-- REMOVED 'stat'
 import type { FileInfo, SortOption, SortDirection } from '@/types/preview';
 import { generateThumbnail } from '@/utils/image_caption_utils';
 import { renameFile } from '@/utils/image_caption_utils';
 import { useNavigate } from '@solidjs/router';
-
-// Helper for file icons (move to UI if needed)
-import { FileImage, Video, Volume2, Code, Archive, FileSpreadsheet, FileText, File } from 'lucide-solid';
-
-function getFileIcon(type: string) {
-	switch (type) {
-		case 'image':
-			return FileImage;
-		case 'video':
-			return Video;
-		case 'audio':
-			return Volume2;
-		case 'code':
-			return Code;
-		case 'archive':
-			return Archive;
-		case 'spreadsheet':
-			return FileSpreadsheet;
-		case 'document':
-			return FileText;
-		default:
-			return File;
-	}
-}
+import { useLocation } from '@solidjs/router';
 
 export function usePreview(itemsPerPage = 10) {
-	// State
+	// States ----------------------------------------------------------
+
 	const [loading, setLoading] = createSignal(true);
 	const [files, setFiles] = createSignal<FileInfo[]>([]);
-	const [previewing, setPreviewing] = createSignal(false);
-	const [comparisons, setComparisons] = createSignal<{ before: string; after: string }[]>([]);
 	const [folderPath, setFolderPath] = createSignal('');
 	const [searchTerm, setSearchTerm] = createSignal('');
 	const [sortBy, setSortBy] = createSignal<SortOption>('name');
 	const [sortDirection, setSortDirection] = createSignal<SortDirection>('asc');
 	const [typeFilter, setTypeFilter] = createSignal('');
 	const [currentPage, setCurrentPage] = createSignal(1);
-
-	const navigate = useNavigate();
-
+	const [stopRequested, setStopRequested] = createSignal(false);
 	const [captionProgress, setCaptionProgress] = createSignal<{
 		processed: number;
 		total: number;
@@ -56,43 +30,78 @@ export function usePreview(itemsPerPage = 10) {
 		variant: 'success' | 'error' | 'warning' | 'info';
 		duration?: number;
 	} | null>(null);
-	const [cancelRequested, setCancelRequested] = createSignal(false);
 
-	// Helpers
-	function getFileType(extension: string): FileInfo['type'] {
-		const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp'];
-		const videoExts = ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm'];
-		const audioExts = ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma'];
-		const documentExts = ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt'];
-		const codeExts = ['.js', '.ts', '.html', '.css', '.py', '.java', '.cpp', '.c', '.rs', '.go'];
-		const archiveExts = ['.zip', '.rar', '.7z', '.tar', '.gz'];
-		const ext = extension.toLowerCase();
-		if (imageExts.includes(ext)) return 'image';
-		if (videoExts.includes(ext)) return 'video';
-		if (audioExts.includes(ext)) return 'audio';
-		if (documentExts.includes(ext)) return 'document';
-		if (codeExts.includes(ext)) return 'code';
-		if (archiveExts.includes(ext)) return 'archive';
-		return 'other';
-	}
+	const navigate = useNavigate();
+	const location = useLocation();
 
-	function getFolderFromSearch() {
-		const params = new URLSearchParams(window.location.search);
-		const folder = params.get('folder');
-		return folder ? decodeURIComponent(folder) : '';
-	}
+	// Update Effects ------------------------------------------------
 
-	function formatFileSize(bytes: number): string {
-		if (bytes === 0) return '0 B';
-		const k = 1024;
-		const sizes = ['B', 'KB', 'MB', 'GB'];
-		const i = Math.floor(Math.log(bytes) / Math.log(k));
-		return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-	}
+	createEffect(() => {
+		searchTerm();
+		typeFilter();
+		setCurrentPage(1);
+	});
 
-	// Fetch files from folder
-	// --- MODIFIED SECTION ---
-	// Fetch files with name, size, type, and thumbnail (async thumbnail loading)
+	createEffect(() => {
+		const search = location.query.folder;
+		if (!search) return;
+
+		console.log(`PREVIEW URL : ${location.pathname + location.search}`);
+		console.log(`PREVIEW FOLDER: ${search}`);
+
+		if (!search) return;
+
+		setFolderPath(typeof search === 'string' ? search : search[0]);
+		setLoading(true);
+		refreshFiles().finally(() => setLoading(false));
+	});
+
+	// Memoization ------------------------------------------------
+
+	const availableTypes = createMemo(() => {
+		const types = [...new Set(files().map((f) => f.type))];
+		return types.sort();
+	});
+
+	const filteredFiles = createMemo(() => {
+		let filtered = files();
+		if (searchTerm()) {
+			const term = searchTerm().toLowerCase();
+			filtered = filtered.filter(
+				(f) =>
+					f.name.toLowerCase().includes(term) ||
+					f.type.toLowerCase().includes(term) ||
+					f.extension.toLowerCase().includes(term)
+			);
+		}
+		if (typeFilter()) {
+			filtered = filtered.filter((f) => f.type === typeFilter());
+		}
+		filtered = [...filtered].sort((a, b) => {
+			let aVal: any, bVal: any;
+			if (sortBy() == 'type') {
+				aVal = a.type.toLowerCase();
+				bVal = b.type.toLowerCase();
+				if (aVal < bVal) return sortDirection() === 'asc' ? -1 : 1;
+				if (aVal > bVal) return sortDirection() === 'asc' ? 1 : -1;
+			}
+			return 0;
+		});
+		return filtered;
+	});
+
+	const paginatedFiles = createMemo(() => {
+		const start = (currentPage() - 1) * itemsPerPage;
+		const end = start + itemsPerPage;
+		return filteredFiles().slice(start, end);
+	});
+
+	const totalPages = createMemo(() => {
+		return Math.ceil(filteredFiles().length / itemsPerPage);
+	});
+
+	// Helper Functions ------------------------------------------------
+
 	async function fetchFiles(folder: string): Promise<FileInfo[]> {
 		try {
 			const entries = await readDir(folder);
@@ -111,7 +120,8 @@ export function usePreview(itemsPerPage = 10) {
 						type,
 						thumbnail: undefined,
 					};
-				});
+				})
+				.sort((a, b) => a.name.localeCompare(b.name));
 
 			// Async thumbnail loading
 			await Promise.all(
@@ -134,123 +144,24 @@ export function usePreview(itemsPerPage = 10) {
 		}
 	}
 
-	// --- END MODIFIED SECTION ---
-
-	// Add refreshFiles function (async)
 	async function refreshFiles() {
 		const folder = folderPath();
 		if (!folder) return;
 		setLoading(true);
 		const fetched = await fetchFiles(folder);
+		console.log(`Fetched ${fetched.length} files from ${folder}`);
+		console.log(
+			`First 10 files: ${fetched
+				.slice(0, 10)
+				.map((f) => f.name)
+				.join(', ')}`
+		);
 		setFiles(fetched);
 		setLoading(false);
 	}
 
-	// Dummy compareFiles
-	async function compareFiles(files: FileInfo[]): Promise<{ before: string; after: string }[]> {
-		await new Promise((resolve) => setTimeout(resolve, 1000));
-		function truncate(name: string, max = 32) {
-			return name.length > max ? name.slice(0, max - 3) + '...' : name;
-		}
-		return files.map((f) => ({
-			before: `${truncate(f.name)}`,
-			after: `${truncate(f.name)}`,
-		}));
-	}
-
-	// Computed
-	const availableTypes = createMemo(() => {
-		const types = [...new Set(files().map((f) => f.type))];
-		return types.sort();
-	});
-
-	const filteredFiles = createMemo(() => {
-		let filtered = files();
-		if (searchTerm()) {
-			const term = searchTerm().toLowerCase();
-			filtered = filtered.filter(
-				(f) =>
-					f.name.toLowerCase().includes(term) ||
-					f.type.toLowerCase().includes(term) ||
-					f.extension.toLowerCase().includes(term)
-			);
-		}
-		if (typeFilter()) {
-			filtered = filtered.filter((f) => f.type === typeFilter());
-		}
-		filtered = [...filtered].sort((a, b) => {
-			let aVal: any, bVal: any;
-			switch (sortBy()) {
-				case 'name':
-					aVal = a.name.toLowerCase();
-					bVal = b.name.toLowerCase();
-					break;
-				case 'size':
-					aVal = a.size;
-					bVal = b.size;
-					break;
-				case 'modified':
-					aVal = a.modified.getTime();
-					bVal = b.modified.getTime();
-					break;
-				case 'type':
-					aVal = a.type.toLowerCase();
-					bVal = b.type.toLowerCase();
-					break;
-				default:
-					aVal = a.name.toLowerCase();
-					bVal = b.name.toLowerCase();
-			}
-			if (aVal < bVal) return sortDirection() === 'asc' ? -1 : 1;
-			if (aVal > bVal) return sortDirection() === 'asc' ? 1 : -1;
-			return 0;
-		});
-		return filtered;
-	});
-
-	const paginatedFiles = createMemo(() => {
-		const start = (currentPage() - 1) * itemsPerPage;
-		const end = start + itemsPerPage;
-		return filteredFiles().slice(start, end);
-	});
-
-	const totalPages = createMemo(() => {
-		return Math.ceil(filteredFiles().length / itemsPerPage);
-	});
-
-	createEffect(() => {
-		searchTerm();
-		typeFilter();
-		setCurrentPage(1);
-	});
-
-	onMount(() => {
-		const folder = getFolderFromSearch();
-		setFolderPath(folder);
-		setLoading(true);
-		// print url
-		console.log(`PREVIEW URL : ${window.location.href}`);
-		// Async fetch on mount
-		refreshFiles().finally(() => setLoading(false));
-	});
-
-	const handlePreview = async () => {
-		setPreviewing(true);
-		setComparisons([]);
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		const result = await compareFiles(filteredFiles());
-		setComparisons(result);
-		setPreviewing(false);
-	};
-
-	// Helper: check if file exists in current folder
-	function fileExists(name: string): boolean {
-		return files().some((f) => f.name === name);
-	}
-
-	// Modified handleApply for batch renaming
 	async function handleApplyRenames() {
-		setCancelRequested(false); // reset cancel flag
+		setStopRequested(false); // reset stop flag
 		const selected = Array.from(selectedFiles());
 		if (selected.length === 0) {
 			setToast({ message: 'Please select files to apply changes to.', variant: 'warning' });
@@ -290,15 +201,21 @@ export function usePreview(itemsPerPage = 10) {
 		function getUniqueName(baseName: string, ext: string): string {
 			let candidate = baseName + ext;
 			let counter = 1;
-			while (fileExists(candidate)) {
+			while (files().some((f) => f.name === candidate)) {
 				candidate = `${baseName}_${counter}${ext}`;
 				counter++;
 			}
 			return candidate;
 		}
 
+		// Helper: check for invalid Windows filename characters
+		function isValidWindowsFilename(name: string): boolean {
+			// Invalid chars: \ / : * ? " < > | and cannot end with space or dot
+			return !/[\\/:*?"<>|]/.test(name) && !/[ .]$/.test(name) && name.length > 0;
+		}
+
 		for (const fileName of selected) {
-			if (cancelRequested()) break; // stop if refresh/cancel requested
+			if (stopRequested()) break; // stop if refresh/stop requested
 			const afterNameRaw = getAfterName(fileName);
 			if (!afterNameRaw) continue; // Only rename if "after" name is available and different
 			const fileObj = files().find((f) => f.name === fileName);
@@ -309,6 +226,18 @@ export function usePreview(itemsPerPage = 10) {
 				? afterNameRaw.slice(0, -ext.length)
 				: afterNameRaw;
 			let targetName = getUniqueName(afterBase, ext);
+
+			// Validate targetName before renaming
+			if (!isValidWindowsFilename(targetName)) {
+				errorCount++;
+				setToast({
+					message: `Invalid filename: "${targetName}". Skipped.`,
+					variant: 'error',
+					duration: 5000,
+				});
+				continue;
+			}
+
 			const oldPath = folderPath() + '/' + fileName;
 			const newPath = folderPath() + '/' + targetName;
 			if (oldPath === newPath) continue;
@@ -339,57 +268,96 @@ export function usePreview(itemsPerPage = 10) {
 		}
 	}
 
-	const handleBack = () => {
+	async function handleApply() {
+		const filesToApply = Array.from(selectedFiles()).filter((fileName) => {
+			const idx = files().findIndex((f) => f.name === fileName);
+			return captionResults().has(idx);
+		});
+		if (filesToApply.length === 0) {
+			setToast({
+				message: 'No selected files have generated captions to apply.',
+				variant: 'warning',
+				duration: 3000,
+			});
+			return;
+		}
+		setSelectedFiles(new Set(filesToApply));
+		await handleApplyRenames();
+		setSelectedFiles(new Set<string>());
+		setCaptionResults(new Map());
+		setCaptionProgress(null);
+		refreshFiles && refreshFiles();
+	}
+
+	function getFileType(extension: string): FileInfo['type'] {
+		const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp'];
+		const videoExts = ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm'];
+		const audioExts = ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma'];
+		const documentExts = ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt'];
+		const codeExts = ['.js', '.ts', '.html', '.css', '.py', '.java', '.cpp', '.c', '.rs', '.go'];
+		const archiveExts = ['.zip', '.rar', '.7z', '.tar', '.gz'];
+		const ext = extension.toLowerCase();
+		if (imageExts.includes(ext)) return 'image';
+		if (videoExts.includes(ext)) return 'video';
+		if (audioExts.includes(ext)) return 'audio';
+		if (documentExts.includes(ext)) return 'document';
+		if (codeExts.includes(ext)) return 'code';
+		if (archiveExts.includes(ext)) return 'archive';
+		return 'other';
+	}
+
+	async function handleBack() {
+		// also apply stop
+		setStopRequested(true);
+		setCaptionProgress(null);
+		await fetch('http://localhost:5000/stop', { method: 'POST' });
+		setToast({
+			message: 'Caption generation stopd. You can now apply changes to processed files.',
+			variant: 'info',
+			duration: 3000,
+		});
+
 		navigate('/', { replace: true });
 		window.location.hash = '';
-	};
+	}
 
-	const handleSortChange = (sort: SortOption, direction: SortDirection) => {
+	function handleSortChange(sort: SortOption, direction: SortDirection) {
 		setSortBy(sort);
 		setSortDirection(direction);
-	};
+	}
 
 	return {
 		loading,
 		files,
-		previewing,
-		comparisons,
 		folderPath,
 		searchTerm,
 		sortBy,
 		sortDirection,
 		typeFilter,
 		currentPage,
-		setSearchTerm,
-		setSortBy,
-		setSortDirection,
-		setTypeFilter,
-		setCurrentPage,
 		availableTypes,
 		filteredFiles,
 		paginatedFiles,
 		totalPages,
-		handlePreview,
-		handleApplyRenames,
+		handleApply,
 		handleBack,
 		handleSortChange,
 		itemsPerPage,
-		getFileType,
-		formatFileSize,
-		fetchFiles,
-		compareFiles,
-		getFileIcon,
 		refreshFiles,
 		captionProgress,
-		setCaptionProgress,
 		captionResults,
-		setCaptionResults,
 		selectedFiles,
-		setSelectedFiles,
 		toast,
+		stopRequested,
+
+		setSearchTerm,
+		setSortDirection,
+		setTypeFilter,
+		setCurrentPage,
+		setCaptionProgress,
+		setCaptionResults,
+		setSelectedFiles,
 		setToast,
-		cancelRequested,
-		setCancelRequested,
-		fileExists,
+		setStopRequested,
 	};
 }

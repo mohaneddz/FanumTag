@@ -12,6 +12,7 @@ interface Props {
     onClick?: any;
     type?: "button" | "submit" | "reset";
     class?: string;
+    icon?: JSX.Element;
 }
 
 export default function Button(props: Props) {
