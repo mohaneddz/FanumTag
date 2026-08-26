@@ -1,3 +1,5 @@
+![Fanum Tag](screenshots/cover.avif)
+
 <h1 style="font-family: Arial, sans-serif; font-size: 36px; color: #77B3FF; display: flex; align-items: center; gap: 12px; border-bottom: 3px solid #77B3FF; padding-bottom: 8px;">
   <img src="src-tauri/icons/128x128.png" alt="FanumTag Icon" style="height: 55px; width: 55px; object-fit: contain; border-radius: 8px;">
   FanumTag - Local-First AI File Renamer
