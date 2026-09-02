@@ -20,7 +20,9 @@ use zip::read::ZipArchive;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
-const RUNTIME_ALIAS: &str = "qwen2-vl-local";
+const RUNTIME_ALIAS: &str = "qwen3-vl-local";
+const VISION_MODEL_FILE: &str = "Qwen3-VL-4B-Instruct-Q4_K_M.gguf";
+const VISION_MMPROJ_FILE: &str = "mmproj-F16.gguf";
 const RUNTIME_PROGRESS_EVENT: &str = "runtime://batch-progress";
 const RUNTIME_COMPLETE_EVENT: &str = "runtime://batch-complete";
 const MAX_TITLE_WORDS: usize = 8;
@@ -235,10 +237,10 @@ fn runtime_assets_candidates(app: &AppHandle) -> Vec<RuntimeAssets> {
         lib_dir: manifest_root.join("lib"),
         model_path: manifest_root
             .join("weights")
-            .join("Qwen2-VL-2B-Instruct-IQ2_M.gguf"),
+            .join(VISION_MODEL_FILE),
         mmproj_path: manifest_root
             .join("weights")
-            .join("mmproj-Qwen2-VL-2B-Instruct-f16.gguf"),
+            .join(VISION_MMPROJ_FILE),
     }];
 
     if let Ok(resource_dir) = app.path().resource_dir() {
@@ -247,10 +249,10 @@ fn runtime_assets_candidates(app: &AppHandle) -> Vec<RuntimeAssets> {
             lib_dir: resource_dir.join("lib"),
             model_path: resource_dir
                 .join("weights")
-                .join("Qwen2-VL-2B-Instruct-IQ2_M.gguf"),
+                .join(VISION_MODEL_FILE),
             mmproj_path: resource_dir
                 .join("weights")
-                .join("mmproj-Qwen2-VL-2B-Instruct-f16.gguf"),
+                .join(VISION_MMPROJ_FILE),
         });
     }
 
@@ -261,11 +263,11 @@ fn runtime_assets_candidates(app: &AppHandle) -> Vec<RuntimeAssets> {
             model_path: cwd
                 .join("src-tauri")
                 .join("weights")
-                .join("Qwen2-VL-2B-Instruct-IQ2_M.gguf"),
+                .join(VISION_MODEL_FILE),
             mmproj_path: cwd
                 .join("src-tauri")
                 .join("weights")
-                .join("mmproj-Qwen2-VL-2B-Instruct-f16.gguf"),
+                .join(VISION_MMPROJ_FILE),
         });
     }
 
@@ -526,6 +528,7 @@ fn spawn_runtime_process(assets: &RuntimeAssets, config: &RuntimeConfig) -> Resu
         .arg("--no-webui")
         .arg("--no-warmup")
         .arg("--flash-attn")
+        .arg("on")
         .current_dir(&assets.lib_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -547,7 +550,11 @@ fn runtime_completion_url(config: &RuntimeConfig) -> String {
     format!("http://{}:{}/v1/chat/completions", config.host, config.port)
 }
 
-fn wait_for_runtime_health(config: &RuntimeConfig, timeout: Duration) -> Result<(), String> {
+fn wait_for_runtime_health(
+    config: &RuntimeConfig,
+    shared: &SharedRuntime,
+    timeout: Duration,
+) -> Result<(), String> {
     let client = Client::builder()
         .timeout(Duration::from_secs(2))
         .build()
@@ -558,6 +565,27 @@ fn wait_for_runtime_health(config: &RuntimeConfig, timeout: Duration) -> Result<
     let models_url = runtime_models_url(config);
 
     while Instant::now() < deadline {
+        let startup_error = {
+            let mut manager = shared
+                .lock()
+                .map_err(|_| "Runtime lock poisoned".to_string())?;
+            refresh_child_state(&mut manager);
+            if manager.child.is_none() {
+                Some(
+                    manager
+                        .last_error
+                        .clone()
+                        .unwrap_or_else(|| "Runtime exited during startup.".to_string()),
+                )
+            } else {
+                None
+            }
+        };
+
+        if let Some(error) = startup_error {
+            return Err(error);
+        }
+
         if let Ok(resp) = client.get(&health_url).send() {
             if resp.status().is_success() {
                 return Ok(());
@@ -720,7 +748,7 @@ fn start_runtime_if_needed(app: &AppHandle, shared: &SharedRuntime) -> Result<()
         manager.last_error = None;
     }
 
-    if let Err(error) = wait_for_runtime_health(&config, Duration::from_secs(45)) {
+    if let Err(error) = wait_for_runtime_health(&config, shared, Duration::from_secs(45)) {
         let _ = stop_runtime_internal(shared);
         let mut manager = shared.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
         manager.last_error = Some(error.clone());
@@ -859,17 +887,17 @@ impl FilenameStyle {
 
     fn max_words(self) -> usize {
         match self {
-            Self::Short => 4,
-            Self::Average => 8,
-            Self::Long => 14,
+            Self::Short => 6,
+            Self::Average => 16,
+            Self::Long => 24,
         }
     }
 
     fn max_tokens(self) -> u16 {
         match self {
-            Self::Short => 48,
-            Self::Average => 80,
-            Self::Long => 112,
+            Self::Short => 64,
+            Self::Average => 128,
+            Self::Long => 192,
         }
     }
 
@@ -877,9 +905,9 @@ impl FilenameStyle {
     /// instruction reads correctly for whichever branch is calling it.
     fn prompt_instruction_for(self, subject: &str) -> String {
         let limit = match self {
-            Self::Short => "a short filename title (max 4 words)",
-            Self::Average => "a concise filename title (max 8 words)",
-            Self::Long => "a detailed filename title (max 14 words)",
+            Self::Short => "a short filename title (up to 6 words)",
+            Self::Average => "an informative filename title (up to 16 words)",
+            Self::Long => "a detailed filename title (up to 24 words)",
         };
         format!(
             "Generate {limit} that names the main subject and action or context of this {subject}. \
@@ -890,7 +918,26 @@ impl FilenameStyle {
     }
 
     fn prompt_instruction(self) -> String {
-        self.prompt_instruction_for("image")
+        let limit = match self {
+            Self::Short => "a short filename title (up to 6 words)",
+            Self::Average => "an informative filename title (up to 16 words)",
+            Self::Long => "a detailed filename title (up to 24 words)",
+        };
+
+        format!(
+            "Generate {limit} for this image using this strict priority order: \
+             1) meaningful visible text, especially a meme caption, punchline, headline, or dialogue; \
+             2) the specific identity of confidently recognized people, fictional characters, creatures, or media subjects; \
+             3) the main action, expression, or scene context. \
+             When meaningful text is readable, transcribe it as written using the same words and order; do not paraphrase, summarize, or replace it with a vague topic. \
+             Begin with as much of the complete caption as the word limit permits, then add the recognized subject and a compact description of the visual scene whenever space remains. \
+             Use the available word budget when it helps preserve both caption and description; brevity is secondary to an informative, searchable title. \
+             Prefer a confidently recognized character or subject name over a generic label, but never guess an identity when uncertain. \
+             Ignore incidental watermarks, usernames, timestamps, interface labels, and tiny background text unless they are central to the image's meaning. \
+             Preserve the exact caption wording wherever it is legible while keeping the combined title natural and searchable. \
+             Do not include phrases like 'image of', 'meme of', or similar preambles. \
+             Do not include a file extension. Return the title only, nothing else."
+        )
     }
 }
 
@@ -1727,8 +1774,7 @@ fn classify_extension(extension: &str) -> (&'static str, &'static str) {
 
 /// Lists a folder natively. Doing this in Rust keeps folders with thousands of
 /// files responsive: nothing but names crosses the IPC boundary.
-#[tauri::command]
-fn list_folder(app: AppHandle, path: String) -> Result<FolderListing, String> {
+fn list_folder_internal(app: AppHandle, path: String) -> Result<FolderListing, String> {
     let root = PathBuf::from(&path);
     if !root.is_dir() {
         return Err(format!("Not a folder: {}", path));
@@ -1778,6 +1824,13 @@ fn list_folder(app: AppHandle, path: String) -> Result<FolderListing, String> {
     subfolders.sort_by_key(|entry| entry.to_lowercase());
 
     Ok(FolderListing { files, subfolders })
+}
+
+#[tauri::command]
+async fn list_folder(app: AppHandle, path: String) -> Result<FolderListing, String> {
+    tauri::async_runtime::spawn_blocking(move || list_folder_internal(app, path))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 fn generate_thumbnail_data_url(path: &Path) -> Result<String, String> {
@@ -1857,7 +1910,13 @@ async fn generate_thumbnails(app: AppHandle, paths: Vec<String>) -> Result<Vec<T
         };
         let slots: Vec<Mutex<Option<String>>> = paths.iter().map(|_| Mutex::new(None)).collect();
         let cursor = AtomicUsize::new(0);
-        let workers = num_cpus::get().clamp(1, 8).min(paths.len().max(1));
+        // Keep at least one logical CPU available for WebView and the native
+        // window event loop. Image decoding and parallel ffmpeg instances can
+        // otherwise starve the UI badly enough for Windows to mark it hung.
+        let workers = num_cpus::get()
+            .saturating_sub(1)
+            .clamp(1, 4)
+            .min(paths.len().max(1));
 
         thread::scope(|scope| {
             for _ in 0..workers {
@@ -1940,9 +1999,14 @@ async fn runtime_health(state: State<'_, SharedRuntime>) -> Result<RuntimeHealth
 }
 
 #[tauri::command]
-fn runtime_force_stop(app: AppHandle, state: State<'_, SharedRuntime>) -> Result<RuntimeStatus, String> {
-    force_stop_internal(state.inner())?;
-    runtime_status_snapshot(&app, state.inner())
+async fn runtime_force_stop(app: AppHandle, state: State<'_, SharedRuntime>) -> Result<RuntimeStatus, String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        force_stop_internal(&shared)?;
+        runtime_status_snapshot(&app, &shared)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -1959,42 +2023,75 @@ fn runtime_get_config(state: State<'_, SharedRuntime>) -> Result<RuntimeConfig, 
 }
 
 #[tauri::command]
-fn runtime_update_config(
+async fn runtime_update_config(
     app: AppHandle,
     state: State<'_, SharedRuntime>,
     config: RuntimeConfig,
 ) -> Result<RuntimeConfig, String> {
     let shared = state.inner().clone();
-    let normalized = normalize_runtime_config(config);
+    tauri::async_runtime::spawn_blocking(move || {
+        let normalized = normalize_runtime_config(config);
 
-    let was_running = {
+        let was_running = {
+            let mut manager = shared
+                .lock()
+                .map_err(|_| "Runtime lock poisoned".to_string())?;
+            refresh_child_state(&mut manager);
+            manager.config = normalized.clone();
+            save_runtime_config(&app, &manager.config)?;
+            manager.child.is_some()
+        };
+
+        if was_running {
+            stop_runtime_internal(&shared)?;
+            start_runtime_if_needed(&app, &shared)?;
+        }
+
+        Ok(normalized)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn runtime_set_auto_start(
+    app: AppHandle,
+    state: State<'_, SharedRuntime>,
+    auto_start: bool,
+) -> Result<RuntimeConfig, String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
         let mut manager = shared
             .lock()
             .map_err(|_| "Runtime lock poisoned".to_string())?;
-        refresh_child_state(&mut manager);
-        manager.config = normalized.clone();
+        manager.config.auto_start = auto_start;
         save_runtime_config(&app, &manager.config)?;
-        manager.child.is_some()
-    };
+        Ok(manager.config.clone())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
 
-    if was_running {
-        stop_runtime_internal(&shared)?;
+#[tauri::command]
+async fn runtime_start(app: AppHandle, state: State<'_, SharedRuntime>) -> Result<RuntimeStatus, String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
         start_runtime_if_needed(&app, &shared)?;
-    }
-
-    Ok(normalized)
+        runtime_status_snapshot(&app, &shared)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn runtime_start(app: AppHandle, state: State<'_, SharedRuntime>) -> Result<RuntimeStatus, String> {
-    start_runtime_if_needed(&app, state.inner())?;
-    runtime_status_snapshot(&app, state.inner())
-}
-
-#[tauri::command]
-fn runtime_stop(app: AppHandle, state: State<'_, SharedRuntime>) -> Result<RuntimeStatus, String> {
-    stop_runtime_internal(state.inner())?;
-    runtime_status_snapshot(&app, state.inner())
+async fn runtime_stop(app: AppHandle, state: State<'_, SharedRuntime>) -> Result<RuntimeStatus, String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        stop_runtime_internal(&shared)?;
+        runtime_status_snapshot(&app, &shared)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -2134,45 +2231,51 @@ async fn runtime_generate_batch(
 }
 
 #[tauri::command]
-fn apply_renames(requests: Vec<RenameRequest>) -> Result<Vec<RenameResult>, String> {
-    Ok(apply_rename_items(requests))
+async fn apply_renames(requests: Vec<RenameRequest>) -> Result<Vec<RenameResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || apply_rename_items(requests))
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn runtime_probe(
+async fn runtime_probe(
     app: AppHandle,
     state: State<'_, SharedRuntime>,
     prompt: Option<String>,
 ) -> Result<RuntimeProbeResult, String> {
     let shared = state.inner().clone();
-    start_runtime_if_needed(&app, &shared)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        start_runtime_if_needed(&app, &shared)?;
 
-    let config = {
-        let manager = shared
-            .lock()
-            .map_err(|_| "Runtime lock poisoned".to_string())?;
-        manager.config.clone()
-    };
+        let config = {
+            let manager = shared
+                .lock()
+                .map_err(|_| "Runtime lock poisoned".to_string())?;
+            manager.config.clone()
+        };
 
-    let client = build_client(config.request_timeout_sec)?;
-    let probe_prompt = prompt.unwrap_or_else(|| "Reply with exactly: VLLM_OK".to_string());
-    let start = Instant::now();
-    let response = chat_completion(
-        &client,
-        &config,
-        json!([
-            {
-                "role": "user",
-                "content": probe_prompt
-            }
-        ]),
-        64,
-    )?;
+        let client = build_client(config.request_timeout_sec)?;
+        let probe_prompt = prompt.unwrap_or_else(|| "Reply with exactly: VLLM_OK".to_string());
+        let start = Instant::now();
+        let response = chat_completion(
+            &client,
+            &config,
+            json!([
+                {
+                    "role": "user",
+                    "content": probe_prompt
+                }
+            ]),
+            64,
+        )?;
 
-    Ok(RuntimeProbeResult {
-        response,
-        elapsed_ms: start.elapsed().as_millis(),
+        Ok(RuntimeProbeResult {
+            response,
+            elapsed_ms: start.elapsed().as_millis(),
+        })
     })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 fn initialize_runtime(app: &AppHandle) -> SharedRuntime {
@@ -2193,7 +2296,7 @@ pub fn run() {
 
             if auto_start {
                 let app_handle = app.app_handle().clone();
-                tauri::async_runtime::spawn(async move {
+                tauri::async_runtime::spawn_blocking(move || {
                     let _ = start_runtime_if_needed(&app_handle, &shared);
                 });
             }
@@ -2208,6 +2311,7 @@ pub fn run() {
             runtime_get_status,
             runtime_get_config,
             runtime_update_config,
+            runtime_set_auto_start,
             runtime_start,
             runtime_stop,
             runtime_cancel_batch,
@@ -2248,6 +2352,9 @@ mod tests {
             sanitize_filename_base_with_limit(raw, "File", 4),
             "one two three four"
         );
+        assert_eq!(FilenameStyle::Short.max_words(), 6);
+        assert_eq!(FilenameStyle::Average.max_words(), 16);
+        assert_eq!(FilenameStyle::Long.max_words(), 24);
     }
 
     #[test]
