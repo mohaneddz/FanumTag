@@ -6,6 +6,7 @@ import Toast from "@/components/Toast";
 import {
   runtimeGetConfig,
   runtimeGetStatus,
+  runtimeSetAutoStart,
   runtimeStart,
   runtimeStop,
   runtimeUpdateConfig,
@@ -123,6 +124,29 @@ export default function Settings() {
     }
   };
 
+  const setAutoStart = async (autoStart: boolean) => {
+    const previous = form()?.autoStart ?? false;
+    setForm((current) => (current ? { ...current, autoStart } : current));
+    setBusy(true);
+
+    try {
+      const updated = await runtimeSetAutoStart(autoStart);
+      setForm((current) => (current ? { ...current, autoStart: updated.autoStart } : current));
+      setToast({
+        message: updated.autoStart ? "Runtime auto-start enabled." : "Runtime auto-start disabled.",
+        variant: "success",
+      });
+    } catch (error) {
+      setForm((current) => (current ? { ...current, autoStart: previous } : current));
+      setToast({
+        message: `Failed to save auto-start setting: ${error instanceof Error ? error.message : String(error)}`,
+        variant: "error",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   onMount(() => {
     void refresh();
   });
@@ -221,7 +245,8 @@ export default function Settings() {
             <input
               type="checkbox"
               checked={form()?.autoStart ?? false}
-              onChange={(e) => setForm((prev) => (prev ? { ...prev, autoStart: e.currentTarget.checked } : prev))}
+              onChange={(e) => void setAutoStart(e.currentTarget.checked)}
+              disabled={busy() || !form()}
               class="h-4 w-4 accent-cyan-400"
             />
             Auto-start runtime on app launch

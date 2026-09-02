@@ -92,6 +92,8 @@ export type ThumbnailResult = {
 export const runtimeGetStatus = () => invoke<RuntimeStatus>("runtime_get_status");
 export const runtimeGetConfig = () => invoke<RuntimeConfig>("runtime_get_config");
 export const runtimeUpdateConfig = (config: RuntimeConfig) => invoke<RuntimeConfig>("runtime_update_config", { config });
+export const runtimeSetAutoStart = (autoStart: boolean) =>
+  invoke<RuntimeConfig>("runtime_set_auto_start", { autoStart });
 export const runtimeStart = () => invoke<RuntimeStatus>("runtime_start");
 export const runtimeStop = () => invoke<RuntimeStatus>("runtime_stop");
 export const runtimeCancelBatch = () => invoke<RuntimeStatus>("runtime_cancel_batch");
