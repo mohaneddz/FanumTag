@@ -15,8 +15,10 @@ It scans a folder into a visual queue, uses local AI to suggest descriptive file
 - Rust owns a singleton local runtime manager.
 - The manager starts one bundled `llama-server.exe` process from `src-tauri/lib`.
 - Vision weights are loaded from `src-tauri/weights`:
-  - `Qwen2-VL-2B-Instruct-IQ2_M.gguf`
-  - `mmproj-Qwen2-VL-2B-Instruct-f16.gguf`
+  - `Qwen3-VL-4B-Instruct-Q4_K_M.gguf`
+  - `mmproj-F16.gguf`
+- Development resolves these local, Git-ignored files at runtime; they are not
+  required Tauri bundle resources.
 - Frontend communicates through Tauri commands/events.
 
 ---

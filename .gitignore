@@ -13,7 +13,7 @@ src-tauri/target/
 
 temp
 
-# AI Models and Weights
+# AI models and weights (including everything under src-tauri/weights/)
 *.gguf
 *.pt
 *.safetensors
@@ -23,6 +23,7 @@ temp
 weights/
 models/
 whisper/
+*.fdmdownload
 
 *.pid
 
