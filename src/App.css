@@ -9,6 +9,46 @@
   box-sizing: border-box;
 }
 
+:where(
+  button,
+  a[href],
+  select,
+  summary,
+  [role="button"],
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="file"],
+  input[type="range"]
+):not(:disabled):not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+:where(
+  button,
+  select,
+  [role="button"],
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="file"],
+  input[type="range"]
+):is(:disabled, [aria-disabled="true"]) {
+  cursor: not-allowed;
+}
+
+label:has(input:is([type="checkbox"], [type="radio"]):not(:disabled)) {
+  cursor: pointer;
+}
+
+label:has(input:is([type="checkbox"], [type="radio"]):disabled) {
+  cursor: not-allowed;
+}
+
 html,
 body,
 #root {
