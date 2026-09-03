@@ -12,8 +12,27 @@ It scans a folder into a visual queue, uses local AI to suggest descriptive file
 
 ## Installation
 
-FanumTag is currently distributed for 64-bit Windows. A complete packaged download
-has this layout:
+FanumTag is currently distributed for 64-bit Windows.
+
+### MSI release
+
+Download `fanumtag_1.2.0_x64_en-US.msi` and its `.sha256` file from the GitHub
+release. Verify it in PowerShell before installing:
+
+```powershell
+(Get-FileHash .\fanumtag_1.2.0_x64_en-US.msi -Algorithm SHA256).Hash.ToLower()
+Get-Content .\fanumtag_1.2.0_x64_en-US.msi.sha256
+```
+
+The values must match. This MSI contains FanumTag and its native runtime, but not
+the large GGUF weights. After installation, open **Settings → Runtime Settings**,
+select an existing Qwen `.gguf` model and compatible MMProj `.gguf`, click
+**Save Configuration**, and then start the runtime. For the default sharded Qwen
+model, select its first shard and keep its second shard in the same directory.
+
+### Complete NSIS package
+
+A complete NSIS package with the default weights has this layout:
 
 ```text
 FanumTag-windows-x64/
@@ -56,7 +75,7 @@ exist when the runtime starts and reports the missing path if either cannot be f
   - `Qwen3-VL-4B-Instruct-Q4_K_M.gguf-00001-of-00002.gguf`
   - `Qwen3-VL-4B-Instruct-Q4_K_M.gguf-00002-of-00002.gguf`
   - `mmproj-F16.gguf`
-- Windows releases include the installer and a `weights` sidecar directory. The
+- Complete Windows NSIS packages include the installer and a `weights` sidecar directory. The
   installer verifies and copies the model shards and projector into the installed
   app by default; keep the release folder together when distributing it. Users can
   override either installed path from Runtime Settings when they want another
