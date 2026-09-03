@@ -10,6 +10,44 @@ It scans a folder into a visual queue, uses local AI to suggest descriptive file
 
 ---
 
+## Installation
+
+FanumTag is currently distributed for 64-bit Windows. A complete packaged download
+has this layout:
+
+```text
+FanumTag-windows-x64/
+├── fanumtag_0.1.0_x64-setup.exe
+└── weights/
+    ├── Qwen3-VL-4B-Instruct-Q4_K_M.gguf-00001-of-00002.gguf
+    ├── Qwen3-VL-4B-Instruct-Q4_K_M.gguf-00002-of-00002.gguf
+    └── mmproj-F16.gguf
+```
+
+1. Download the complete Windows package and extract it if it is archived.
+2. Keep `fanumtag_0.1.0_x64-setup.exe` beside the `weights` directory.
+3. Run the installer. It verifies all three model files and copies them into the
+   installed application automatically.
+4. Open **Settings → Runtime Settings** and leave **Qwen Model Path** and
+   **MMProj Model Path** empty to use the bundled defaults.
+5. Start the runtime. The first Qwen shard automatically discovers the second
+   shard in the same directory.
+
+Do not run a detached copy of the installer: installation stops with a clear error
+if its `weights` directory is missing. The complete package requires approximately
+3.44 GiB of disk space before installation. A release without a Windows package
+contains source code only and must be built using the development instructions below.
+
+### Using custom weights
+
+In **Settings → Runtime Settings**, use **Browse** to select another compatible
+`.gguf` Qwen model or multimodal projector, then click **Save Configuration**. For
+a sharded model, select the first shard and keep every shard together. Clear a path
+and save to return to the bundled default. FanumTag checks that both selected files
+exist when the runtime starts and reports the missing path if either cannot be found.
+
+---
+
 ## Runtime Architecture
 
 - Rust owns a singleton local runtime manager.
@@ -87,6 +125,10 @@ Configure the local runtime and check the health of its bundled dependencies fro
 pnpm install
 pnpm tauri dev
 ```
+
+Development expects the llama.cpp runtime files under `src-tauri/lib` and the three
+GGUF files shown above under `src-tauri/weights`. These large local assets are ignored
+by Git and are not included in GitHub's automatic source archives.
 
 ## Checks
 
