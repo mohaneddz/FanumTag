@@ -100,6 +100,7 @@ struct RuntimeManager {
     busy: bool,
     cancel_requested: bool,
     force_stop_requested: bool,
+    shutting_down: bool,
     /// ffmpeg / whisper processes currently running for the active batch, so a
     /// force stop can kill work that is already mid-flight.
     aux_children: Vec<(u64, Child)>,
@@ -115,6 +116,7 @@ impl RuntimeManager {
             busy: false,
             cancel_requested: false,
             force_stop_requested: false,
+            shutting_down: false,
             aux_children: Vec::new(),
             next_aux_id: 0,
             last_error: None,
@@ -710,7 +712,7 @@ fn shutdown_runtime_internal(shared: &SharedRuntime) -> Result<(), String> {
             .lock()
             .map_err(|_| "Runtime lock poisoned".to_string())?;
         manager.cancel_requested = true;
-        manager.force_stop_requested = true;
+        manager.shutting_down = true;
         manager.busy = false;
         (
             std::mem::take(&mut manager.aux_children),
@@ -738,7 +740,7 @@ fn run_tracked_command(shared: &SharedRuntime, command: &mut Command) -> Result<
         let mut manager = shared
             .lock()
             .map_err(|_| "Runtime lock poisoned".to_string())?;
-        if manager.force_stop_requested {
+        if manager.shutting_down {
             drop(manager);
             terminate_child(&mut child);
             return Err("App is shutting down.".to_string());
@@ -820,7 +822,7 @@ fn force_stop_internal(shared: &SharedRuntime) -> Result<(), String> {
 fn start_runtime_if_needed(app: &AppHandle, shared: &SharedRuntime) -> Result<(), String> {
     let config = {
         let mut manager = shared.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
-        if manager.force_stop_requested {
+        if manager.shutting_down {
             return Err("App is shutting down.".to_string());
         }
         if is_runtime_running_locked(&mut manager) {
@@ -835,7 +837,7 @@ fn start_runtime_if_needed(app: &AppHandle, shared: &SharedRuntime) -> Result<()
 
     {
         let mut manager = shared.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
-        if manager.force_stop_requested {
+        if manager.shutting_down {
             drop(manager);
             terminate_child(&mut child);
             return Err("App is shutting down.".to_string());
