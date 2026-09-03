@@ -122,6 +122,18 @@ impl RuntimeManager {
     }
 }
 
+impl Drop for RuntimeManager {
+    fn drop(&mut self) {
+        for (_, child) in &mut self.aux_children {
+            terminate_child(child);
+        }
+
+        if let Some(child) = &mut self.child {
+            terminate_child(child);
+        }
+    }
+}
+
 type SharedRuntime = Arc<Mutex<RuntimeManager>>;
 
 #[derive(Debug, Clone, Serialize)]
@@ -687,15 +699,50 @@ fn stop_runtime_internal(shared: &SharedRuntime) -> Result<(), String> {
     Ok(())
 }
 
+fn terminate_child(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn shutdown_runtime_internal(shared: &SharedRuntime) -> Result<(), String> {
+    let (mut aux_children, mut main_child) = {
+        let mut manager = shared
+            .lock()
+            .map_err(|_| "Runtime lock poisoned".to_string())?;
+        manager.cancel_requested = true;
+        manager.force_stop_requested = true;
+        manager.busy = false;
+        (
+            std::mem::take(&mut manager.aux_children),
+            manager.child.take(),
+        )
+    };
+
+    for (_, child) in &mut aux_children {
+        terminate_child(child);
+    }
+
+    if let Some(child) = &mut main_child {
+        terminate_child(child);
+    }
+
+    Ok(())
+}
+
 /// Runs an auxiliary process (ffmpeg / whisper) while keeping its handle in the
 /// manager, so a force stop can kill it instead of waiting for it to finish.
 fn run_tracked_command(shared: &SharedRuntime, command: &mut Command) -> Result<bool, String> {
-    let child = command.spawn().map_err(|e| e.to_string())?;
+    let mut child = command.spawn().map_err(|e| e.to_string())?;
 
     let id = {
         let mut manager = shared
             .lock()
             .map_err(|_| "Runtime lock poisoned".to_string())?;
+        if manager.force_stop_requested {
+            drop(manager);
+            terminate_child(&mut child);
+            return Err("App is shutting down.".to_string());
+        }
         let id = manager.next_aux_id;
         manager.next_aux_id = manager.next_aux_id.wrapping_add(1);
         manager.aux_children.push((id, child));
@@ -773,6 +820,9 @@ fn force_stop_internal(shared: &SharedRuntime) -> Result<(), String> {
 fn start_runtime_if_needed(app: &AppHandle, shared: &SharedRuntime) -> Result<(), String> {
     let config = {
         let mut manager = shared.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
+        if manager.force_stop_requested {
+            return Err("App is shutting down.".to_string());
+        }
         if is_runtime_running_locked(&mut manager) {
             return Ok(());
         }
@@ -781,10 +831,15 @@ fn start_runtime_if_needed(app: &AppHandle, shared: &SharedRuntime) -> Result<()
     };
 
     let assets = resolve_runtime_assets(app, &config)?;
-    let child = spawn_runtime_process(&assets, &config)?;
+    let mut child = spawn_runtime_process(&assets, &config)?;
 
     {
         let mut manager = shared.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
+        if manager.force_stop_requested {
+            drop(manager);
+            terminate_child(&mut child);
+            return Err("App is shutting down.".to_string());
+        }
         manager.child = Some(child);
         manager.last_error = None;
     }
@@ -2326,7 +2381,7 @@ fn initialize_runtime(app: &AppHandle) -> SharedRuntime {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .setup(|app| {
             let shared = initialize_runtime(&app.app_handle());
             let auto_start = shared
@@ -2365,8 +2420,16 @@ pub fn run() {
             apply_renames,
             runtime_probe
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("error while running tauri application");
+
+    app.run(|app_handle, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            if let Some(runtime) = app_handle.try_state::<SharedRuntime>() {
+                let _ = shutdown_runtime_internal(runtime.inner());
+            }
+        }
+    });
 }
 
 #[cfg(test)]
