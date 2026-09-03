@@ -9,6 +9,8 @@ export type RuntimeConfig = {
   ctxSize: number;
   requestTimeoutSec: number;
   autoStart: boolean;
+  modelPath: string;
+  mmprojPath: string;
 };
 
 export type RuntimeStatus = {

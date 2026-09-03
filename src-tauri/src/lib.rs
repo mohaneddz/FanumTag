@@ -21,7 +21,7 @@ use zip::read::ZipArchive;
 use std::os::windows::process::CommandExt;
 
 const RUNTIME_ALIAS: &str = "qwen3-vl-local";
-const VISION_MODEL_FILE: &str = "Qwen3-VL-4B-Instruct-Q4_K_M.gguf";
+const VISION_MODEL_FILE: &str = "Qwen3-VL-4B-Instruct-Q4_K_M.gguf-00001-of-00002.gguf";
 const VISION_MMPROJ_FILE: &str = "mmproj-F16.gguf";
 const RUNTIME_PROGRESS_EVENT: &str = "runtime://batch-progress";
 const RUNTIME_COMPLETE_EVENT: &str = "runtime://batch-complete";
@@ -38,6 +38,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(default)]
 struct RuntimeConfig {
     host: String,
     port: u16,
@@ -46,6 +47,8 @@ struct RuntimeConfig {
     ctx_size: u32,
     request_timeout_sec: u64,
     auto_start: bool,
+    model_path: String,
+    mmproj_path: String,
 }
 
 impl Default for RuntimeConfig {
@@ -59,6 +62,8 @@ impl Default for RuntimeConfig {
             ctx_size: 8192,
             request_timeout_sec: 120,
             auto_start: false,
+            model_path: String::new(),
+            mmproj_path: String::new(),
         }
     }
 }
@@ -197,6 +202,8 @@ fn normalize_runtime_config(mut config: RuntimeConfig) -> RuntimeConfig {
     config.gpu_layers = config.gpu_layers.clamp(-1, 200);
     config.ctx_size = config.ctx_size.clamp(2048, 65536);
     config.request_timeout_sec = config.request_timeout_sec.clamp(5, 900);
+    config.model_path = config.model_path.trim().to_string();
+    config.mmproj_path = config.mmproj_path.trim().to_string();
 
     config
 }
@@ -230,7 +237,7 @@ fn save_runtime_config(app: &AppHandle, config: &RuntimeConfig) -> Result<(), St
     fs::write(path, raw).map_err(|e| e.to_string())
 }
 
-fn runtime_assets_candidates(app: &AppHandle) -> Vec<RuntimeAssets> {
+fn runtime_assets_candidates(app: &AppHandle, config: &RuntimeConfig) -> Vec<RuntimeAssets> {
     let manifest_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut candidates = vec![RuntimeAssets {
         exe_path: manifest_root.join("lib").join("llama-server.exe"),
@@ -269,6 +276,15 @@ fn runtime_assets_candidates(app: &AppHandle) -> Vec<RuntimeAssets> {
                 .join("weights")
                 .join(VISION_MMPROJ_FILE),
         });
+    }
+
+    for candidate in &mut candidates {
+        if !config.model_path.is_empty() {
+            candidate.model_path = PathBuf::from(&config.model_path);
+        }
+        if !config.mmproj_path.is_empty() {
+            candidate.mmproj_path = PathBuf::from(&config.mmproj_path);
+        }
     }
 
     candidates
@@ -477,18 +493,30 @@ fn bootstrap_whisper_assets(app: &AppHandle) -> Result<WhisperAssets, String> {
     })
 }
 
-fn resolve_runtime_assets(app: &AppHandle) -> Result<RuntimeAssets, String> {
-    for candidate in runtime_assets_candidates(app) {
+fn resolve_runtime_assets(app: &AppHandle, config: &RuntimeConfig) -> Result<RuntimeAssets, String> {
+    let candidates = runtime_assets_candidates(app, config);
+
+    for candidate in &candidates {
         if candidate.exe_path.exists()
             && candidate.lib_dir.exists()
             && candidate.model_path.exists()
             && candidate.mmproj_path.exists()
         {
-            return Ok(candidate);
+            return Ok(candidate.clone());
         }
     }
 
-    Err("Could not resolve llama runtime assets (llama-server.exe, model, mmproj).".to_string())
+    // Return the best runtime location even when a configured model path is
+    // invalid so status can report binary/model/projector availability
+    // independently instead of marking every asset as missing.
+    if let Some(candidate) = candidates
+        .into_iter()
+        .find(|candidate| candidate.exe_path.exists() && candidate.lib_dir.exists())
+    {
+        return Ok(candidate);
+    }
+
+    Err("Could not resolve llama runtime executable and libraries.".to_string())
 }
 
 fn prepend_path(lib_dir: &Path) -> Result<OsString, String> {
@@ -506,6 +534,19 @@ fn configure_process_command(command: &mut Command) {
 }
 
 fn spawn_runtime_process(assets: &RuntimeAssets, config: &RuntimeConfig) -> Result<Child, String> {
+    if !assets.model_path.is_file() {
+        return Err(format!(
+            "Qwen model file was not found: {}",
+            assets.model_path.display()
+        ));
+    }
+    if !assets.mmproj_path.is_file() {
+        return Err(format!(
+            "Vision projector file was not found: {}",
+            assets.mmproj_path.display()
+        ));
+    }
+
     let mut cmd = Command::new(&assets.exe_path);
     configure_process_command(&mut cmd);
     cmd.arg("--model")
@@ -739,7 +780,7 @@ fn start_runtime_if_needed(app: &AppHandle, shared: &SharedRuntime) -> Result<()
         manager.config.clone()
     };
 
-    let assets = resolve_runtime_assets(app)?;
+    let assets = resolve_runtime_assets(app, &config)?;
     let child = spawn_runtime_process(&assets, &config)?;
 
     {
@@ -759,7 +800,7 @@ fn start_runtime_if_needed(app: &AppHandle, shared: &SharedRuntime) -> Result<()
 }
 
 fn runtime_status_snapshot(app: &AppHandle, shared: &SharedRuntime) -> Result<RuntimeStatus, String> {
-    let (running, busy, cancel_requested, pid, last_error) = {
+    let (running, busy, cancel_requested, pid, last_error, config) = {
         let mut manager = shared.lock().map_err(|_| "Runtime lock poisoned".to_string())?;
         refresh_child_state(&mut manager);
 
@@ -769,10 +810,11 @@ fn runtime_status_snapshot(app: &AppHandle, shared: &SharedRuntime) -> Result<Ru
             manager.cancel_requested,
             manager.child.as_ref().map(Child::id),
             manager.last_error.clone(),
+            manager.config.clone(),
         )
     };
 
-    let assets = resolve_runtime_assets(app).ok();
+    let assets = resolve_runtime_assets(app, &config).ok();
     let whisper_assets = resolve_whisper_assets(app);
 
     Ok(RuntimeStatus {
@@ -2330,6 +2372,35 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_runtime_config_uses_bundled_model_paths() {
+        let config: RuntimeConfig = serde_json::from_value(json!({
+            "host": "127.0.0.1",
+            "port": 11435,
+            "gpuLayers": -1,
+            "threads": 0,
+            "ctxSize": 8192,
+            "requestTimeoutSec": 120,
+            "autoStart": false
+        }))
+        .expect("legacy runtime config should remain readable");
+
+        assert!(config.model_path.is_empty());
+        assert!(config.mmproj_path.is_empty());
+    }
+
+    #[test]
+    fn custom_model_paths_are_trimmed_without_being_rewritten() {
+        let mut config = RuntimeConfig::default();
+        config.model_path = "  D:\\Models\\qwen.gguf  ".to_string();
+        config.mmproj_path = "  D:\\Models\\mmproj.gguf  ".to_string();
+
+        let normalized = normalize_runtime_config(config);
+
+        assert_eq!(normalized.model_path, "D:\\Models\\qwen.gguf");
+        assert_eq!(normalized.mmproj_path, "D:\\Models\\mmproj.gguf");
+    }
 
     #[test]
     fn trims_connectives_left_dangling_by_the_word_limit() {

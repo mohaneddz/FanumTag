@@ -1,6 +1,7 @@
 import { createSignal, onMount, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import { Activity, ArrowLeft, Play, Save, Square, RefreshCw } from "lucide-solid";
+import { open } from "@tauri-apps/plugin-dialog";
+import { Activity, ArrowLeft, FolderOpen, Play, Save, Square, RefreshCw } from "lucide-solid";
 
 import Toast from "@/components/Toast";
 import {
@@ -22,6 +23,8 @@ type RuntimeForm = {
   ctxSize: string;
   requestTimeoutSec: string;
   autoStart: boolean;
+  modelPath: string;
+  mmprojPath: string;
 };
 
 function toForm(config: RuntimeConfig): RuntimeForm {
@@ -33,6 +36,8 @@ function toForm(config: RuntimeConfig): RuntimeForm {
     ctxSize: String(config.ctxSize),
     requestTimeoutSec: String(config.requestTimeoutSec),
     autoStart: config.autoStart,
+    modelPath: config.modelPath,
+    mmprojPath: config.mmprojPath,
   };
 }
 
@@ -45,6 +50,8 @@ function toConfig(form: RuntimeForm): RuntimeConfig {
     ctxSize: Number(form.ctxSize) || 8192,
     requestTimeoutSec: Number(form.requestTimeoutSec) || 120,
     autoStart: form.autoStart,
+    modelPath: form.modelPath.trim(),
+    mmprojPath: form.mmprojPath.trim(),
   };
 }
 
@@ -147,6 +154,24 @@ export default function Settings() {
     }
   };
 
+  const pickModelFile = async (field: "modelPath" | "mmprojPath") => {
+    try {
+      const selected = await open({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "GGUF model", extensions: ["gguf"] }],
+      });
+      if (typeof selected === "string") {
+        setForm((current) => (current ? { ...current, [field]: selected } : current));
+      }
+    } catch (error) {
+      setToast({
+        message: `Could not select model file: ${error instanceof Error ? error.message : String(error)}`,
+        variant: "error",
+      });
+    }
+  };
+
   onMount(() => {
     void refresh();
   });
@@ -238,6 +263,46 @@ export default function Settings() {
                 value={form()?.requestTimeoutSec ?? ""}
                 onInput={(e) => setForm((prev) => (prev ? { ...prev, requestTimeoutSec: e.currentTarget.value } : prev))}
               />
+            </label>
+
+            <label class="space-y-1 md:col-span-2">
+              <span class="text-xs text-slate-400 uppercase tracking-[0.16em]">Qwen Model Path</span>
+              <div class="flex gap-2">
+                <input
+                  class="min-w-0 flex-1 h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm font-mono"
+                  value={form()?.modelPath ?? ""}
+                  onInput={(e) => setForm((prev) => (prev ? { ...prev, modelPath: e.currentTarget.value } : prev))}
+                  placeholder="Bundled default: Qwen3-VL-4B-Instruct-Q4_K_M (sharded)"
+                />
+                <button
+                  type="button"
+                  class="h-10 px-3 rounded-lg border border-white/10 bg-white/[0.04] text-sm flex items-center gap-1.5 hover:bg-white/[0.08] disabled:opacity-50"
+                  onClick={() => void pickModelFile("modelPath")}
+                  disabled={busy() || !form()}
+                >
+                  <FolderOpen size={14} /> Browse
+                </button>
+              </div>
+            </label>
+
+            <label class="space-y-1 md:col-span-2">
+              <span class="text-xs text-slate-400 uppercase tracking-[0.16em]">MMProj Model Path</span>
+              <div class="flex gap-2">
+                <input
+                  class="min-w-0 flex-1 h-10 rounded-lg border border-white/10 bg-slate-950/70 px-3 text-sm font-mono"
+                  value={form()?.mmprojPath ?? ""}
+                  onInput={(e) => setForm((prev) => (prev ? { ...prev, mmprojPath: e.currentTarget.value } : prev))}
+                  placeholder="Bundled default: mmproj-F16.gguf"
+                />
+                <button
+                  type="button"
+                  class="h-10 px-3 rounded-lg border border-white/10 bg-white/[0.04] text-sm flex items-center gap-1.5 hover:bg-white/[0.08] disabled:opacity-50"
+                  onClick={() => void pickModelFile("mmprojPath")}
+                  disabled={busy() || !form()}
+                >
+                  <FolderOpen size={14} /> Browse
+                </button>
+              </div>
             </label>
           </div>
 
