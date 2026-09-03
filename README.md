@@ -15,10 +15,15 @@ It scans a folder into a visual queue, uses local AI to suggest descriptive file
 - Rust owns a singleton local runtime manager.
 - The manager starts one bundled `llama-server.exe` process from `src-tauri/lib`.
 - Vision weights are loaded from `src-tauri/weights`:
-  - `Qwen3-VL-4B-Instruct-Q4_K_M.gguf`
+  - `Qwen3-VL-4B-Instruct-Q4_K_M.gguf-00001-of-00002.gguf`
+  - `Qwen3-VL-4B-Instruct-Q4_K_M.gguf-00002-of-00002.gguf`
   - `mmproj-F16.gguf`
-- Development resolves these local, Git-ignored files at runtime; they are not
-  required Tauri bundle resources.
+- Windows releases include the installer and a `weights` sidecar directory. The
+  installer verifies and copies the model shards and projector into the installed
+  app by default; keep the release folder together when distributing it. Users can
+  override either installed path from Runtime Settings when they want another
+  compatible model or projector. For a sharded custom model, select its first shard;
+  llama.cpp discovers the remaining shards automatically.
 - Frontend communicates through Tauri commands/events.
 
 ---
