@@ -17,7 +17,7 @@ has this layout:
 
 ```text
 FanumTag-windows-x64/
-├── fanumtag_0.1.0_x64-setup.exe
+├── fanumtag_1.2.0_x64-setup.exe
 └── weights/
     ├── Qwen3-VL-4B-Instruct-Q4_K_M.gguf-00001-of-00002.gguf
     ├── Qwen3-VL-4B-Instruct-Q4_K_M.gguf-00002-of-00002.gguf
@@ -25,7 +25,7 @@ FanumTag-windows-x64/
 ```
 
 1. Download the complete Windows package and extract it if it is archived.
-2. Keep `fanumtag_0.1.0_x64-setup.exe` beside the `weights` directory.
+2. Keep `fanumtag_1.2.0_x64-setup.exe` beside the `weights` directory.
 3. Run the installer. It verifies all three model files and copies them into the
    installed application automatically.
 4. Open **Settings → Runtime Settings** and leave **Qwen Model Path** and
